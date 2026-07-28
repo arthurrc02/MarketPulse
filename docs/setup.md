@@ -22,16 +22,16 @@ Guia para colocar o ambiente de desenvolvimento do MarketPulse no ar.
 MarketPulse/
 ├── backend/            # API FastAPI (arquitetura em camadas)
 │   ├── app/
-│   │   ├── api/        # Routers e dependências HTTP
-│   │   ├── core/       # Settings e logging
+│   │   ├── api/        # Routers (health, auth, users) e dependências HTTP
+│   │   ├── core/       # Settings, logging, security (JWT/bcrypt), erros de domínio
 │   │   ├── db/         # Engine, sessão e base declarativa
-│   │   ├── models/     # Models SQLAlchemy (vazio na Sprint 0)
+│   │   ├── models/     # User, RefreshToken
 │   │   ├── repositories/
 │   │   ├── schemas/    # Contratos Pydantic
-│   │   └── services/   # Regras de negócio
-│   ├── migrations/     # Alembic
+│   │   └── services/   # AuthService e demais regras de negócio
+│   ├── migrations/     # Alembic (1 revisão: users + refresh_tokens)
 │   └── tests/
-├── etl/                # Motor ETL (apenas contratos na Sprint 0)
+├── etl/                # Motor ETL (apenas contratos até aqui)
 │   ├── etl/
 │   │   ├── extractors/
 │   │   ├── transformers/
@@ -39,9 +39,12 @@ MarketPulse/
 │   └── tests/
 ├── frontend/           # Aplicação React + TypeScript + Vite
 │   └── src/
-│       ├── lib/        # QueryClient, env
-│       ├── pages/      # Páginas
-│       ├── routes/     # Roteamento
+│       ├── context/    # AuthContext / AuthProvider
+│       ├── hooks/      # useAuth
+│       ├── components/ # ui/ (Button, Input, PasswordInput, Card, Logo) + layout/ (AuthLayout)
+│       ├── lib/        # apiClient, auth/api, auth/tokenStore, QueryClient, env
+│       ├── pages/      # LoginPage, RegisterPage, DashboardPage
+│       ├── routes/     # AppRoutes, ProtectedRoute, PublicOnlyRoute
 │       ├── styles/     # Tailwind
 │       └── test/       # Setup do Vitest
 ├── docker/             # Dockerfiles e configuração do Nginx
@@ -69,6 +72,10 @@ cp .env.example .env
 | `POSTGRES_HOST` / `_PORT`           | `localhost` / `5432`    | Host e porta do banco.                    |
 | `BACKEND_PORT` / `FRONTEND_PORT`    | `8000` / `5173`         | Portas publicadas pelo Compose.           |
 | `CORS_ORIGINS`                      | `http://localhost:5173` | Origens permitidas (separadas por vírgula). |
+| `SECRET_KEY`                        | chave de dev (insegura) | Assina os access tokens JWT. **Obrigatório** definir um valor real quando `ENVIRONMENT=production` — o backend recusa subir com o padrão. |
+| `JWT_ALGORITHM`                     | `HS256`                 | Algoritmo de assinatura do JWT.            |
+| `ACCESS_TOKEN_EXPIRE_MINUTES`       | `15`                    | Validade do access token.                  |
+| `REFRESH_TOKEN_EXPIRE_DAYS`         | `7`                     | Validade do refresh token.                 |
 | `VITE_API_URL`                      | `http://localhost:8000` | URL da API consumida pelo frontend.       |
 
 > Em `production`, a documentação interativa (`/docs`, `/redoc`, `/openapi.json`) é desabilitada automaticamente.
@@ -130,8 +137,17 @@ Qualidade:
 uv run ruff check .          # lint
 uv run ruff format .         # formatação
 uv run mypy                  # type checking (strict)
-uv run pytest                # testes (backend + etl)
+uv run pytest                # testes (backend + etl) — SQLite em memória por padrão
 uv run pytest --cov          # com cobertura
+```
+
+Por padrão a suíte roda contra SQLite em memória (rápido, sem dependência
+externa). Para rodar contra um PostgreSQL real — o que a CI faz —, defina
+`TEST_DATABASE_URL`:
+
+```bash
+docker compose up -d postgres
+TEST_DATABASE_URL=postgresql+psycopg://marketpulse:marketpulse@localhost:5432/marketpulse uv run pytest
 ```
 
 ### Frontend
@@ -168,8 +184,8 @@ uv run alembic downgrade -1
 uv run alembic current
 ```
 
-> A Sprint 0 não possui migrations: nenhum model de negócio foi criado ainda. A
-> primeira revisão nasce na Sprint 1, junto do model de usuário.
+> A primeira revisão (`867258180ae6`) cria as tabelas `users` e
+> `refresh_tokens`, geradas por autogenerate na Sprint 1.
 
 ---
 
@@ -188,8 +204,22 @@ curl http://localhost:8000/health
 }
 ```
 
-O frontend em http://localhost:5173 deve exibir a página temporária informando
-que o projeto está em desenvolvimento.
+Depois de aplicar a migration (`uv run alembic upgrade head` a partir de
+`backend/`), o fluxo de autenticação completo pode ser testado via `curl` —
+contrato completo em [api.md](api.md):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "Sup3rSecret!"}'
+
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "Sup3rSecret!"}'
+```
+
+O frontend em http://localhost:5173 deve exibir a tela de login; após
+cadastro/login, a página protegida temporária com "Bem-vindo ao MarketPulse."
 
 ---
 
@@ -198,7 +228,9 @@ que o projeto está em desenvolvimento.
 O workflow [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) roda em
 `push` e `pull_request` para `main`, em três jobs:
 
-1. **Backend** — Ruff (lint + formatação), MyPy (strict) e Pytest com cobertura.
+1. **Backend** — Ruff (lint + formatação), MyPy (strict), migration do
+   Alembic (`upgrade`/`downgrade`/`upgrade`) e Pytest com cobertura — os dois
+   últimos contra um serviço PostgreSQL real (não o SQLite usado localmente).
 2. **Frontend** — ESLint, Prettier, `tsc`, Vitest e build do Vite.
 3. **Docker** — constrói as imagens de produção do backend e do frontend.
 
@@ -231,3 +263,14 @@ pelo Compose. Fora do Docker ela fica desligada, para não consumir CPU à toa.
 **Erro de CORS no navegador**
 Adicione a origem em `CORS_ORIGINS` no `.env` e recrie o backend
 (`docker compose up -d --force-recreate backend`).
+
+**Backend recusa subir com `ValidationError` em `SECRET_KEY`**
+Só acontece com `ENVIRONMENT=production` e a `SECRET_KEY` padrão — é
+proposital (ver [ADR-024](decisions.md#adr-024--secret_key-com-mínimo-de-32-bytes-e-bloqueio-em-produção)).
+Defina uma chave real no `.env` antes de usar `ENVIRONMENT=production`.
+
+**`GET /users/me` retorna 401 mesmo logo após o login**
+Confirme que o header é `Authorization: Bearer <access_token>` (não
+`refresh_token>`) e que o access token não passou de 15 minutos — depois
+disso, é preciso renovar via `POST /auth/refresh` (o frontend faz isso
+automaticamente).

@@ -5,11 +5,18 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, PostgresDsn, SecretStr, field_validator
+from pydantic import Field, PostgresDsn, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "development", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+# Valor de fábrica de `SECRET_KEY`: aceitável em `local`/`development`, mas
+# bloqueado em `production` pelo validador `_forbid_insecure_secret_in_production`.
+# Precisa ter pelo menos 32 bytes: PyJWT emite `InsecureKeyLengthWarning` para
+# chaves HMAC mais curtas (RFC 7518 §3.2), e a suíte de testes trata warnings
+# como erro (`filterwarnings = ["error"]`).
+_INSECURE_DEFAULT_SECRET_KEY = "insecure-dev-secret-change-me-in-production"
 
 # backend/app/core/config.py -> backend/app/core -> backend/app -> backend -> raiz
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -54,6 +61,12 @@ class Settings(BaseSettings):
     # Se preenchida, tem precedência sobre as variáveis POSTGRES_* acima.
     DATABASE_URL: SecretStr | None = None
 
+    # -- Autenticação (JWT + refresh token) ---------------------------------
+    SECRET_KEY: SecretStr = SecretStr(_INSECURE_DEFAULT_SECRET_KEY)
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:
@@ -87,6 +100,21 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Indica se a aplicação está rodando em ambiente produtivo."""
         return self.ENVIRONMENT == "production"
+
+    @model_validator(mode="after")
+    def _forbid_insecure_secret_in_production(self) -> "Settings":
+        """Impede subir em produção com a `SECRET_KEY` de desenvolvimento.
+
+        Um JWT assinado com uma chave pública (versionada em `config.py`)
+        permitiria forjar tokens de acesso de qualquer usuário.
+        """
+        uses_insecure_secret = self.SECRET_KEY.get_secret_value() == _INSECURE_DEFAULT_SECRET_KEY
+        if self.is_production and uses_insecure_secret:
+            raise ValueError(
+                "SECRET_KEY não pode usar o valor padrão de desenvolvimento em produção. "
+                "Defina uma chave forte e única via variável de ambiente."
+            )
+        return self
 
 
 @lru_cache(maxsize=1)

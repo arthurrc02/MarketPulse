@@ -1,11 +1,11 @@
 """Models do SQLAlchemy.
 
-Ainda vazio na Sprint 0 (Foundation): nenhuma entidade de negócio foi
-modelada. Todo model criado nas próximas sprints deve ser importado aqui
-para ser registrado no ``Base.metadata`` e detectado pelo autogenerate do
-Alembic.
+Todo model deve ser importado aqui para ser registrado no ``Base.metadata`` e
+detectado pelo autogenerate do Alembic.
 """
 
 from app.db.base import Base
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
 
-__all__ = ["Base"]
+__all__ = ["Base", "RefreshToken", "User"]

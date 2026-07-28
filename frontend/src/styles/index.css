@@ -1,9 +1,9 @@
 @import 'tailwindcss';
 
 /*
- * Sprint 0 (Foundation): apenas o mínimo para o Tailwind funcionar e a página
- * temporária renderizar em dark mode. Os tokens completos e os componentes do
- * Design System são entregues na Sprint 2.
+ * Tokens mínimos: o suficiente para as telas de autenticação da Sprint 1
+ * (Button, Input, PasswordInput, Card, Logo, AuthLayout). A paleta completa,
+ * tipografia e espaçamento do Design System chegam na Sprint 2.
  */
 
 @theme {
@@ -11,6 +11,16 @@
   --color-surface-elevated: oklch(0.22 0.018 265);
   --color-content: oklch(0.97 0.005 265);
   --color-content-muted: oklch(0.72 0.015 265);
+
+  --color-border: oklch(0.32 0.02 265);
+  --color-border-focus: oklch(0.62 0.19 280);
+
+  --color-primary: oklch(0.62 0.19 280);
+  --color-primary-hover: oklch(0.68 0.19 280);
+  --color-primary-foreground: oklch(0.99 0.005 280);
+
+  --color-danger: oklch(0.63 0.22 25);
+  --color-danger-foreground: oklch(0.98 0.01 25);
 }
 
 @layer base {

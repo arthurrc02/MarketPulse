@@ -3,8 +3,8 @@
 | Sprint | Entrega                             | Status       |
 | ------ | ----------------------------------- | ------------ |
 | 0      | Foundation                          | ✅ Concluída |
-| 1      | Authentication                      | ⏳ Próxima   |
-| 2      | Design System & Frontend Foundation | ⬜ Planejada |
+| 1      | Authentication                      | ✅ Concluída |
+| 2      | Design System & Frontend Foundation | ⏳ Próxima   |
 | 3      | File Import                         | ⬜ Planejada |
 | 4      | ETL Engine                          | ⬜ Planejada |
 | 5      | Analytics Dashboard                 | ⬜ Planejada |
@@ -44,35 +44,59 @@ processamento ETL e componentes do Design System.
 
 ---
 
-## Sprint 1 — Authentication ⏳
+## Sprint 1 — Authentication ✅
 
-**Objetivo:** cadastro, login e proteção de rotas com JWT.
+**Objetivo:** cadastro, login, sessão persistente, proteção de rotas e logout
+— toda a infraestrutura de autenticação, sem nenhuma funcionalidade de
+negócio.
 
-**Escopo previsto:**
+**Entregue:**
 
-- Model `User` e primeira migration do Alembic.
-- Hash de senha com Passlib/Bcrypt.
-- Endpoints `POST /api/v1/auth/register`, `POST /api/v1/auth/login` e
-  `GET /api/v1/users/me`, sob o prefixo versionado.
-- Dependência `get_current_user` para proteção de rotas.
-- Repositório e serviço de usuários seguindo as camadas já estabelecidas.
-- Testes de integração com banco de teste.
-- CI passa a subir um serviço PostgreSQL para os testes.
+- Models `User` e `RefreshToken` + primeira migration do Alembic (única
+  gerada até aqui), validada com `upgrade`/`downgrade`/`upgrade` contra
+  PostgreSQL real.
+- Hash de senha com `bcrypt` direto (substitui `Passlib/Bcrypt`, incompatível
+  com `bcrypt>=4.1` — ver [ADR-020](decisions.md#adr-020--bcrypt-direto-no-lugar-de-passlibbcrypt)).
+- Access token JWT (PyJWT, HS256, 15 min) e refresh token opaco e revogável,
+  com rotação a cada uso (ver [ADR-018](decisions.md#adr-018--refresh-token-opaco-e-revogável-em-vez-de-jwt-stateless)).
+- Endpoints `POST /api/v1/auth/{register,login,refresh,logout}` e
+  `GET /api/v1/users/me`, todos sob o prefixo versionado — contrato completo
+  em [api.md](api.md) (novo).
+- `AuthService` + `UserRepository`/`RefreshTokenRepository` seguindo a
+  arquitetura em camadas já estabelecida; hierarquia `AppError` traduzida
+  para HTTP por um exception handler central.
+- Dependência `get_current_user` (via `HTTPBearer`) protegendo `GET /users/me`.
+- Frontend: `AuthContext`/`AuthProvider` (sessão, silent refresh no boot),
+  `apiClient` com retry automático em 401, guards `ProtectedRoute` /
+  `PublicOnlyRoute`, páginas de Login, Cadastro e um Dashboard temporário
+  ("Bem-vindo ao MarketPulse.").
+- Seis componentes mínimos de UI (`Button`, `Input`, `PasswordInput`, `Card`,
+  `Logo`, `AuthLayout`) — o restante do Design System é da Sprint 2.
+- 57 testes de backend (security, config, fluxo completo de auth via HTTP,
+  casos de erro) rodando contra SQLite **e** PostgreSQL real; 21 testes de
+  frontend (bootstrap de sessão, login, cadastro, logout, guards de rota).
+- CI: serviço PostgreSQL no job de backend, validando migration e suíte
+  contra o dialeto de produção (ver [ADR-019](decisions.md#adr-019--suíte-de-testes-com-sqlite-por-padrão-postgresql-real-na-ci)).
+
+**Fora de escopo (por decisão):** upload de arquivos, ETL, dashboard real,
+insights, integrações com marketplaces, Design System completo.
 
 ---
 
-## Sprint 2 — Design System & Frontend Foundation ⬜
+## Sprint 2 — Design System & Frontend Foundation ⏳
 
 **Objetivo:** identidade visual e componentes reutilizáveis.
 
 **Escopo previsto:**
 
-- Paleta completa e tokens de tipografia, espaçamento e raio em `@theme`.
-- Componentes de layout, inputs, feedback, dados e navegação descritos em
-  [design-system.md](design-system.md).
+- Paleta completa e tokens de tipografia, espaçamento e raio em `@theme`
+  (os tokens da Sprint 1 — cor primária, borda, erro — são o ponto de
+  partida, não um recomeço).
+- Componentes de layout (AppLayout, Sidebar, Header, PageContainer, Section)
+  e os demais catálogos descritos em [design-system.md](design-system.md).
 - Framer Motion para transições de página e micro animações.
-- Cliente HTTP e hooks de React Query.
-- Telas de login e cadastro consumindo a API da Sprint 1.
+- Hooks de React Query para dados de negócio (a base do React Query já está
+  configurada desde a Sprint 0).
 - Reavaliação de hooks de pré-commit (`pre-commit` / `lint-staged`), adiados na
   Sprint 0 (ADR-009).
 

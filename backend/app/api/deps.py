@@ -3,10 +3,15 @@
 from typing import Annotated
 
 from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.errors import InvalidTokenError
+from app.core.security import TokenDecodeError, decode_access_token
 from app.db.session import get_session
+from app.models.user import User
+from app.services.auth import AuthService
 from app.services.health import HealthService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -19,3 +24,40 @@ def get_health_service(settings: SettingsDep) -> HealthService:
 
 
 HealthServiceDep = Annotated[HealthService, Depends(get_health_service)]
+
+
+def get_auth_service(session: SessionDep) -> AuthService:
+    """Injeta o serviço de autenticação."""
+    return AuthService(session)
+
+
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+# `auto_error=False`: sem isso, a ausência do header `Authorization` gera um
+# 403 do próprio Starlette em vez do 401 (com `WWW-Authenticate: Bearer`) que
+# `get_current_user` produz abaixo — 401 é a resposta semanticamente correta
+# para "não autenticado".
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+    auth_service: AuthServiceDep,
+) -> User:
+    """Resolve o usuário autenticado a partir do header `Authorization: Bearer`.
+
+    Usado por toda rota protegida. Raises `InvalidTokenError`/`UserInactiveError`
+    (traduzidos para HTTP pelo exception handler em `app.main`).
+    """
+    if credentials is None:
+        raise InvalidTokenError("Token de acesso ausente.")
+
+    try:
+        payload = decode_access_token(credentials.credentials)
+    except TokenDecodeError as exc:
+        raise InvalidTokenError(str(exc)) from exc
+
+    return auth_service.get_active_user(payload.user_id)
+
+
+CurrentUserDep = Annotated[User, Depends(get_current_user)]

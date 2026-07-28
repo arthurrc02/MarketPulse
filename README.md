@@ -9,8 +9,10 @@ negócio. O MarketPulse importa arquivos CSV e Excel de **Shopee, Mercado Livre,
 Amazon e Magalu**, padroniza tudo em um único modelo de dados e apresenta
 indicadores, gráficos e insights automáticos em um dashboard moderno.
 
-> **Status:** Sprint 0 (Foundation) concluída. A infraestrutura está montada;
-> as funcionalidades de negócio começam na Sprint 1.
+> **Status:** Sprint 1 (Authentication) concluída. Cadastro, login, sessão
+> persistente, rotas protegidas e logout já funcionam de ponta a ponta;
+> nenhuma funcionalidade de negócio (marketplaces, upload, ETL, dashboard)
+> existe ainda — começam na Sprint 3 em diante.
 
 ---
 
@@ -18,7 +20,7 @@ indicadores, gráficos e insights automáticos em um dashboard moderno.
 
 | Camada             | Tecnologias                                                                 |
 | ------------------ | --------------------------------------------------------------------------- |
-| **Backend**        | Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · Pydantic v2 · PostgreSQL 16 |
+| **Backend**        | Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · Pydantic v2 · PostgreSQL 16 · PyJWT · bcrypt |
 | **Frontend**       | React 19 · TypeScript · Vite · Tailwind CSS 4 · React Router · React Query   |
 | **ETL**            | Pandas · OpenPyXL                                                           |
 | **Infraestrutura** | Docker · Docker Compose · GitHub Actions                                     |
@@ -40,8 +42,16 @@ docker compose up --build
 | Health     | http://localhost:8000/health |
 | Swagger UI | http://localhost:8000/docs   |
 
+Depois de subir os contêineres, aplique a migration para criar as tabelas de
+autenticação:
+
+```bash
+docker compose exec backend alembic upgrade head
+```
+
 O setup local (sem Docker), as variáveis de ambiente e os comandos de migration
-estão em **[docs/setup.md](docs/setup.md)**.
+estão em **[docs/setup.md](docs/setup.md)**; os endpoints disponíveis em
+**[docs/api.md](docs/api.md)**.
 
 ---
 
@@ -50,7 +60,7 @@ estão em **[docs/setup.md](docs/setup.md)**.
 ```text
 backend/     API FastAPI em camadas (api → services → repositories → db)
 etl/         Motor ETL (extractors, transformers, loaders)
-frontend/    Aplicação React + TypeScript
+frontend/    Aplicação React + TypeScript — login, cadastro e sessão já funcionam
 docker/      Dockerfiles e configuração do Nginx
 docs/        Documentação do projeto
 .github/     Pipelines de CI
@@ -87,6 +97,7 @@ somadas ao build das imagens Docker de produção.
 | [architecture.md](docs/architecture.md)     | Arquitetura, camadas e stack                |
 | [design-system.md](docs/design-system.md)   | Identidade visual e catálogo de componentes |
 | [roadmap.md](docs/roadmap.md)               | Sprints e escopo de cada entrega            |
+| [api.md](docs/api.md)                       | Referência dos endpoints e fluxo de autenticação |
 | [setup.md](docs/setup.md)                   | Instalação, execução e solução de problemas |
 | [decisions.md](docs/decisions.md)           | Registro de decisões técnicas (ADRs)        |
 
@@ -97,8 +108,8 @@ somadas ao build das imagens Docker de produção.
 | Sprint | Entrega                             | Status       |
 | ------ | ----------------------------------- | ------------ |
 | 0      | Foundation                          | ✅ Concluída |
-| 1      | Authentication                      | ⏳ Próxima   |
-| 2      | Design System & Frontend Foundation | ⬜ Planejada |
+| 1      | Authentication                      | ✅ Concluída |
+| 2      | Design System & Frontend Foundation | ⏳ Próxima   |
 | 3      | File Import                         | ⬜ Planejada |
 | 4      | ETL Engine                          | ⬜ Planejada |
 | 5      | Analytics Dashboard                 | ⬜ Planejada |

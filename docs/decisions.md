@@ -342,3 +342,244 @@ intervalos fixos também no desenvolvimento nativo, consumindo CPU sem ganho.
 **Consequências.** HMR funciona nos dois modos, sem custo desnecessário fora do
 Docker. Quem rodar o frontend em outro ambiente com bind mount precisa definir a
 variável manualmente (documentado em [setup.md](setup.md)).
+
+---
+
+## ADR-018 — Refresh token opaco e revogável em vez de JWT stateless
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** Um refresh token poderia ser mais um JWT assinado, validado só
+pela assinatura (stateless). Isso é simples, mas torna "logout" um teatro: o
+token continua criptograficamente válido até expirar, mesmo depois de o
+usuário clicar em "Sair".
+
+**Decisão.** O refresh token é uma string aleatória opaca
+(`secrets.token_urlsafe(32)`), sem nenhum dado embutido. O servidor guarda
+apenas o **hash SHA-256** dela na tabela `refresh_tokens`, junto de
+`user_id`, `expires_at` e `revoked_at`. Cada uso rotaciona o token: o antigo é
+revogado e um novo é emitido (`AuthService.refresh`), então um refresh token
+só serve uma vez — reuso é tratado como sessão inválida.
+
+**Alternativas descartadas.**
+
+- _Refresh token como JWT de longa duração_: mais simples de implementar, mas
+  sem revogação real — um "logout" não encerraria nada no servidor.
+- _Blocklist de JWTs revogados_: alcançaria o mesmo efeito, mas exige guardar
+  uma entrada por token revogado *indefinidamente* (até a expiração natural do
+  JWT), enquanto o modelo opaco só guarda tokens *ativos* — o próprio
+  `expires_at` limita o crescimento da tabela.
+
+**Consequências.** O access token continua sendo um JWT stateless (rápido de
+validar, sem consulta ao banco); só o refresh token toca o banco, e apenas na
+troca de sessão (a cada ~15 min, não a cada requisição). SHA-256 (não bcrypt)
+é usado para o hash — o valor já é aleatório de alta entropia, não uma senha
+escolhida por humano, então não há necessidade de um hash lento.
+
+---
+
+## ADR-019 — Suíte de testes com SQLite por padrão, PostgreSQL real na CI
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** O roadmap da Sprint 0 já previa "testes de integração com banco
+de teste" e "CI sobe um serviço PostgreSQL". Exigir Postgres rodando para
+`uv run pytest` funcionar localmente adicionaria fricção ao ciclo de
+desenvolvimento (é preciso ter Docker de pé só para rodar testes).
+
+**Decisão.** `backend/tests/conftest.py` usa SQLite em memória por padrão,
+criando o schema do zero a cada teste (`Base.metadata.create_all`/`drop_all`).
+Definir `TEST_DATABASE_URL` troca o backend para o banco apontado — é
+exatamente o que a CI faz, apontando para o serviço `postgres` do workflow.
+A suíte inteira (52 testes) roda sem alteração de código contra os dois
+bancos.
+
+**Alternativas descartadas.**
+
+- _Só SQLite, sempre_: mais rápido, mas esconderia incompatibilidades de
+  dialeto — foi exatamente isso que expôs o bug do ADR-025 abaixo.
+- _Só PostgreSQL, sempre_: mais fiel à produção, mas exige Docker de pé para
+  qualquer `pytest` local, inclusive para editar um único teste.
+
+**Consequências.** A CI (`.github/workflows/ci.yml`) roda lint/tipos/testes
+**e** `alembic upgrade head` / `downgrade base` / `upgrade head` contra um
+Postgres 16 real de serviço, validando tanto a suíte quanto a migration no
+dialeto de produção. Isso só funciona porque os models não usam nenhum
+recurso específico do PostgreSQL (JSONB, arrays, etc.) — se isso mudar no
+futuro, os testes que dependem desses recursos precisarão exigir
+`TEST_DATABASE_URL` explicitamente.
+
+---
+
+## ADR-020 — `bcrypt` direto no lugar de `passlib[bcrypt]`
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** `architecture.md` previa "Passlib/Bcrypt". Ao testar essa
+combinação, `passlib==1.7.4` (última versão, projeto em modo de manutenção)
+quebra com `bcrypt>=4.1`: `AttributeError: module 'bcrypt' has no attribute
+'__about__'`, um problema de compatibilidade conhecido e nunca corrigido no
+passlib.
+
+**Decisão.** Usar a biblioteca `bcrypt` diretamente
+(`bcrypt.hashpw`/`bcrypt.checkpw` em `app/core/security.py`), sem a camada do
+passlib.
+
+**Alternativas descartadas.**
+
+- _Fixar `bcrypt<4.1`_: resolveria o sintoma, mas fixaria uma versão cada vez
+  mais antiga de uma dependência de segurança, sem correção à vista do lado
+  do passlib.
+
+**Consequências.** Uma linha a menos de abstração e uma dependência a menos.
+O código explicitamente trunca a senha em 72 bytes antes de verificar
+(`_BCRYPT_MAX_PASSWORD_BYTES`), replicando a única validação que o passlib
+fazia por baixo dos panos. O schema `UserCreate` já rejeita senhas acima
+desse limite (ver ADR-024), então esse truncamento nunca deveria disparar na
+prática — é uma segunda camada de defesa, não o mecanismo principal.
+
+---
+
+## ADR-021 — `HTTPBearer(auto_error=False)` para responder 401 e não 403
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** O padrão do FastAPI para `HTTPBearer()` (`auto_error=True`)
+responde **403 Forbidden** quando o header `Authorization` está ausente — um
+comportamento historicamente questionado do Starlette/FastAPI. Semanticamente,
+"não autenticado" é 401; 403 deveria significar "autenticado, mas sem
+permissão".
+
+**Decisão.** `_bearer_scheme = HTTPBearer(auto_error=False)`; quando
+`credentials` vem `None`, `get_current_user` levanta explicitamente
+`InvalidTokenError` (401, com `WWW-Authenticate: Bearer` implícito no
+exception handler).
+
+**Consequências.** Toda ausência ou invalidade de token responde 401,
+uniformemente — inclusive testado (`test_me_fails_without_a_token`).
+
+---
+
+## ADR-022 — Cadastro não retorna tokens; frontend faz login automaticamente
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** Era preciso decidir se `POST /auth/register` autentica o
+usuário imediatamente (retornando tokens) ou apenas cria o recurso.
+
+**Decisão.** `/auth/register` retorna `201` com o `UserRead` criado — sem
+tokens. O `AuthContext.register()` do frontend chama `login()` com as mesmas
+credenciais logo em seguida, então o usuário só percebe uma "conta criada e já
+logada" (ver `docs/api.md`).
+
+**Alternativas descartadas.**
+
+- _Registro retorna tokens diretamente_: uma chamada a menos, mas mistura duas
+  responsabilidades num único endpoint (criar recurso vs. iniciar sessão) e
+  duplicaria a lógica de emissão de tokens entre `register` e `login` no
+  service.
+
+**Consequências.** `AuthService.register` fica simples (só cria o usuário);
+toda a lógica de emissão de tokens vive em um único lugar
+(`AuthService._issue_tokens`, chamado por `authenticate` e `refresh`).
+
+---
+
+## ADR-023 — Sessão do frontend: access token em memória, refresh token em `localStorage`
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** "Permanecer autenticado" exige sobreviver a um F5. Guardar o
+access token em `localStorage` é a forma mais simples, mas amplia a janela de
+exposição a um roubo via XSS (qualquer script injetado pode lê-lo).
+
+**Decisão.** O access token vive só em memória (`lib/auth/tokenStore.ts`,
+variável de módulo) — nunca é persistido. O refresh token vai para
+`localStorage` (é o único jeito de sobreviver a um reload). Ao carregar a
+aplicação, `AuthProvider` troca o refresh token salvo por um access token novo
+(`hydrateFromStoredRefreshToken`); a cada 401 numa chamada autenticada,
+`apiClient` tenta uma única renovação silenciosa antes de desistir.
+
+**Alternativas descartadas.**
+
+- _Cookies httpOnly para os dois tokens_: mais seguro contra XSS, mas exige
+  que o backend defina/leia cookies (CORS com credentials, CSRF token,
+  `SameSite`), passando de um problema de frontend para um de contrato
+  full-stack. Fica como melhoria futura (ver seção de melhorias no
+  relatório da sprint).
+
+**Consequências.** Um XSS bem-sucedido rouba, na pior hipótese, um access
+token de 15 minutos — não os 7 dias do refresh token. O preço é a
+complexidade do "silent refresh" (bootstrap + retry em 401), testada em
+`AuthContext.test.tsx`.
+
+---
+
+## ADR-024 — `SECRET_KEY` com mínimo de 32 bytes e bloqueio em produção
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** PyJWT emite `InsecureKeyLengthWarning` para chaves HMAC-SHA256
+menores que 32 bytes (RFC 7518 §3.2). Como a suíte roda com
+`filterwarnings = ["error"]` (ADR-011), o valor padrão inicial de
+`SECRET_KEY` (30 bytes) quebrava os testes de emissão de token.
+
+**Decisão.** `_INSECURE_DEFAULT_SECRET_KEY` tem 43 bytes. Um
+`model_validator` em `Settings` recusa esse valor padrão quando
+`ENVIRONMENT=production`, exigindo uma chave real via variável de ambiente.
+
+**Consequências.** É impossível subir em produção sem definir `SECRET_KEY`
+explicitamente — testado (`test_default_secret_key_is_rejected_in_production`)
+e validado manualmente contra o Docker Compose (container recusa subir com a
+chave padrão quando `ENVIRONMENT=production`).
+
+---
+
+## ADR-025 — Normalização de datetime naive/aware entre SQLite e PostgreSQL
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** `RefreshToken.expires_at` é `DateTime(timezone=True)`. O
+PostgreSQL devolve datetimes aware; o SQLite (usado nos testes, ver ADR-019)
+não preserva timezone — o valor volta *naive*. Comparar os dois formatos
+(`record.expires_at < datetime.now(UTC)`) lançava
+`TypeError: can't compare offset-naive and offset-aware datetimes`, mas só na
+suíte local (SQLite); o mesmo código funcionaria sem erro contra Postgres.
+
+**Decisão.** `app.core.security.ensure_aware_utc()` normaliza qualquer
+datetime para aware-UTC antes de comparar, tratando `tzinfo is None` como "já
+está em UTC, só faltou o marcador". `AuthService.refresh` usa essa função ao
+invés de comparar `record.expires_at` diretamente.
+
+**Consequências.** O mesmo código de comparação funciona nos dois bancos —
+achado justamente porque a suíte roda contra ambos (ADR-019). Se o SQLite não
+fosse usado nos testes, esse bug só apareceria much mais tarde, com dados
+gravados via SQLAlchemy num cenário que por acaso perdesse o timezone.
+
+---
+
+## ADR-026 — `AuthContext.tsx` e a definição do contexto em arquivos separados
+
+**Sprint:** 1 · **Status:** Aceita
+
+**Contexto.** Duas necessidades conflitantes: (1) o ESLint
+(`react-refresh/only-export-components`) recomenda que um arquivo que exporta
+um componente React não exporte também um valor não-componente (como o objeto
+`Context`), para o Fast Refresh funcionar corretamente; (2) nomear o arquivo
+da definição `authContext.ts` (mesmo nome do componente, só com inicial
+minúscula) quebrou o **TypeScript project service** do ESLint no Windows —
+`AuthContext.tsx` deixou de ser encontrado, porque o filesystem é
+case-insensitive e as duas identidades colidiram na camada de resolução de
+projeto do `tsserver`.
+
+**Decisão.** A definição do contexto (`AuthContext`, `AuthContextValue`,
+`AuthStatus`) vive em `src/context/authContextDefinition.ts` — um nome
+claramente distinto, não só por capitalização. O componente `AuthProvider`
+fica em `src/context/AuthContext.tsx`, importando a definição do outro
+arquivo.
+
+**Consequências.** Zero warnings de lint, e nenhuma ambiguidade de nome de
+arquivo em filesystems case-insensitive (Windows, macOS padrão). Ao criar
+outros contextos React no projeto (nenhum previsto antes da Sprint 3), seguir
+o mesmo padrão: nomes de arquivo que diferem por mais do que a capitalização
+da primeira letra.

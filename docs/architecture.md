@@ -37,8 +37,8 @@ ETL Engine (Pandas)
 - PostgreSQL 16
 - Pydantic v2 / Pydantic Settings
 - psycopg 3
-- JWT Authentication (Sprint 1)
-- Passlib/Bcrypt (Sprint 1)
+- PyJWT (access token)
+- bcrypt (hash de senha — ver [ADR-020](decisions.md#adr-020--bcrypt-direto-no-lugar-de-passlibbcrypt); substitui o `Passlib/Bcrypt` planejado inicialmente)
 - Pytest
 
 ### Frontend
@@ -135,6 +135,38 @@ infraestrutura, consumida por Docker e CI, e não um recurso da API (ADR-003).
 
 ---
 
+## Autenticação (Backend)
+
+Implementada na Sprint 1. Endpoints e contratos completos em
+[api.md](api.md); aqui, apenas o desenho.
+
+```text
+POST /auth/register  → cria o usuário (não emite tokens)
+POST /auth/login     → valida credenciais, emite access + refresh token
+POST /auth/refresh   → rotaciona o refresh token, emite um par novo
+POST /auth/logout    → revoga o refresh token informado
+GET  /users/me       → protegido por get_current_user
+```
+
+| Peça                    | Arquivo                            | Papel                                                        |
+| ------------------------ | ----------------------------------- | ------------------------------------------------------------- |
+| `User`, `RefreshToken`   | `app/models/`                       | Entidades persistidas (única tabela de negócio desta sprint). |
+| `AuthService`            | `app/services/auth.py`              | Cadastro, login, refresh (rotação), logout (revogação).       |
+| `UserRepository`, `RefreshTokenRepository` | `app/repositories/`   | Acesso a dados, sem lógica de negócio.                         |
+| `security.py`            | `app/core/security.py`              | Hash de senha (bcrypt), JWT (PyJWT), geração/hash do refresh token. |
+| `errors.py`              | `app/core/errors.py`                | Hierarquia `AppError` → HTTP, via exception handler em `main.py`. |
+| `get_current_user`       | `app/api/deps.py`                   | Resolve o usuário a partir do `Authorization: Bearer`.         |
+
+**Modelo de tokens:**
+
+- **Access token** — JWT (HS256), stateless, 15 min (`ACCESS_TOKEN_EXPIRE_MINUTES`).
+- **Refresh token** — string opaca de alta entropia; só o hash SHA-256 é
+  persistido (`refresh_tokens.token_hash`); 7 dias (`REFRESH_TOKEN_EXPIRE_DAYS`);
+  **rotacionado a cada uso** e revogável (torna o logout real — ver
+  [ADR-018](decisions.md#adr-018--refresh-token-opaco-e-revogável-em-vez-de-jwt-stateless)).
+
+---
+
 ## Arquitetura do Frontend
 
 ```text
@@ -157,16 +189,59 @@ Os componentes deverão ser reutilizáveis sempre que possível.
 
 ### Mapeamento para o código
 
-| Camada     | Diretório       | Responsabilidade                             |
-| ---------- | --------------- | -------------------------------------------- |
-| Pages      | `src/pages/`    | Telas completas.                              |
-| Routes     | `src/routes/`   | Definição de rotas e redirecionamentos.       |
-| Components | `src/components/` | Design System e componentes reutilizáveis (Sprint 2). |
-| Hooks      | `src/hooks/`    | Lógica de UI e consultas ao React Query (Sprint 2).   |
-| Lib        | `src/lib/`      | QueryClient, cliente HTTP e configuração.     |
-| Styles     | `src/styles/`   | Tokens e camadas base do Tailwind.            |
+| Camada     | Diretório          | Responsabilidade                                                |
+| ---------- | ------------------ | ------------------------------------------------------------------ |
+| Pages      | `src/pages/`       | Telas completas.                                                    |
+| Routes     | `src/routes/`      | Definição de rotas e guards (`ProtectedRoute`, `PublicOnlyRoute`).  |
+| Context    | `src/context/`     | Estado global (`AuthContext`/`AuthProvider`).                       |
+| Components | `src/components/`  | Design System e componentes reutilizáveis — só os da Sprint 1 (auth) até aqui; o restante chega na Sprint 2. |
+| Hooks      | `src/hooks/`       | `useAuth`; consultas ao React Query chegam na Sprint 2.             |
+| Lib        | `src/lib/`         | `apiClient`, `auth/api`, `auth/tokenStore`, QueryClient, `env`.     |
+| Styles     | `src/styles/`      | Tokens e camadas base do Tailwind.                                  |
 
 O alias `@/` aponta para `src/`, configurado tanto no Vite quanto no TypeScript.
+
+> Arquivos de contexto React devem ter nomes que diferem por mais do que a
+> capitalização da primeira letra (ex.: `AuthContext.tsx` +
+> `authContextDefinition.ts`, não `AuthContext.tsx` + `authContext.ts`) — o
+> `tsserver` do ESLint confunde os dois em filesystems case-insensitive
+> (ver [ADR-026](decisions.md#adr-026--authcontexttsx-e-a-definição-do-contexto-em-arquivos-separados)).
+
+---
+
+## Autenticação (Frontend)
+
+```text
+AuthProvider (Context)
+   │
+   ├── bootstrap: troca o refresh token salvo por uma sessão nova (silent refresh)
+   ├── login / register / logout
+   │
+   ▼
+ProtectedRoute / PublicOnlyRoute   (guards baseados em status: loading | authenticated | unauthenticated)
+   │
+   ▼
+apiClient   → anexa o access token; em 401, tenta uma renovação silenciosa antes de desistir
+   │
+   ▼
+Backend
+```
+
+| Peça                                | Arquivo                                | Papel                                                        |
+| ------------------------------------ | ---------------------------------------- | ------------------------------------------------------------- |
+| `tokenStore`                        | `src/lib/auth/tokenStore.ts`             | Access token em memória; refresh token em `localStorage`.      |
+| `auth/api`                          | `src/lib/auth/api.ts`                    | Chamadas HTTP tipadas (camelCase), mapeando o wire snake_case. |
+| `apiClient`                         | `src/lib/apiClient.ts`                   | `fetch` com header de auth e retry único em 401.               |
+| `AuthContext` / `AuthProvider`      | `src/context/`                           | Estado de sessão + bootstrap (ver acima).                       |
+| `useAuth`                            | `src/hooks/useAuth.ts`                   | Hook de acesso ao contexto.                                     |
+| `ProtectedRoute` / `PublicOnlyRoute` | `src/routes/`                            | Guards de rota.                                                 |
+| `Button`, `Input`, `PasswordInput`, `Card`, `Logo` | `src/components/ui/`     | Componentes mínimos da Sprint 1 (auth). Design System completo na Sprint 2. |
+| `AuthLayout`                         | `src/components/layout/`                 | Layout compartilhado por login e cadastro.                      |
+
+O access token nunca é persistido (só em memória); o refresh token vai para
+`localStorage` porque precisa sobreviver a um reload — é o que torna
+"permanecer autenticado" possível (ver
+[ADR-023](decisions.md#adr-023--sessão-do-frontend-access-token-em-memória-refresh-token-em-localstorage)).
 
 ---
 
@@ -235,7 +310,9 @@ Ambos usam a **raiz do repositório** como contexto de build (ADR-014).
 
 `.github/workflows/ci.yml` roda em três jobs paralelos:
 
-1. **Backend** — Ruff (lint + formatação), MyPy (strict) e Pytest com cobertura.
+1. **Backend** — Ruff (lint + formatação), MyPy (strict), migration do Alembic
+   (`upgrade`/`downgrade`/`upgrade` contra um serviço PostgreSQL real) e Pytest
+   com cobertura (ver [ADR-019](decisions.md#adr-019--suíte-de-testes-com-sqlite-por-padrão-postgresql-real-na-ci)).
 2. **Frontend** — ESLint, Prettier, `tsc`, Vitest e build do Vite.
 3. **Docker** — build das imagens de produção (depende dos dois anteriores).
 
@@ -259,3 +336,8 @@ Ambos usam a **raiz do repositório** como contexto de build (ADR-014).
 
 As decisões técnicas relevantes, com contexto, alternativas descartadas e
 consequências, estão registradas em [decisions.md](decisions.md).
+
+## Referência da API
+
+Endpoints, contratos de requisição/resposta e o fluxo completo de
+autenticação estão documentados em [api.md](api.md).

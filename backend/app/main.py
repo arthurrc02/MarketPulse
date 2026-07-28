@@ -3,11 +3,13 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.errors import AppError
 from app.core.logging import configure_logging
 
 
@@ -38,9 +40,17 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.exception_handler(AppError)
+    async def handle_app_error(_request: Request, exc: AppError) -> JSONResponse:
+        """Traduz erros de domínio (services) em respostas HTTP.
+
+        Mantém services e repositórios sem qualquer conhecimento de
+        FastAPI/Starlette — a tradução para HTTP acontece só aqui.
+        """
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
     # `GET /health` é uma sonda de infraestrutura e fica fora do prefixo
-    # versionado. Os endpoints de negócio entram sob `settings.API_V1_PREFIX`
-    # a partir da Sprint 1.
+    # versionado. Os endpoints de negócio ficam sob `settings.API_V1_PREFIX`.
     app.include_router(api_router)
 
     return app

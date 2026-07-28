@@ -2,7 +2,15 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import health
+from app.api.routes import auth, health, users
+from app.core.config import settings
 
 api_router = APIRouter()
+
+# `GET /health` é uma sonda de infraestrutura e fica fora do prefixo versionado.
 api_router.include_router(health.router)
+
+v1_router = APIRouter(prefix=settings.API_V1_PREFIX)
+v1_router.include_router(auth.router)
+v1_router.include_router(users.router)
+api_router.include_router(v1_router)

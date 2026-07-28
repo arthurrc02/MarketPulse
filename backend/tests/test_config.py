@@ -9,7 +9,7 @@ from app.core.config import Settings
 @pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Impede que um `.env` do desenvolvedor interfira nos casos de teste."""
-    for name in ("CORS_ORIGINS", "DATABASE_URL", "POSTGRES_HOST", "POSTGRES_PORT"):
+    for name in ("CORS_ORIGINS", "DATABASE_URL", "POSTGRES_HOST", "POSTGRES_PORT", "SECRET_KEY"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -86,6 +86,41 @@ def test_invalid_log_level_is_rejected() -> None:
 )
 def test_is_production(environment: str, expected: bool) -> None:
     """`is_production` só é verdadeiro no ambiente produtivo."""
-    settings = Settings(_env_file=None, ENVIRONMENT=environment)  # type: ignore[arg-type]
+    # Uma SECRET_KEY customizada evita o validador de produção (testado à
+    # parte abaixo) e mantém este teste focado só em `is_production`.
+    settings = Settings(
+        _env_file=None,
+        ENVIRONMENT=environment,  # type: ignore[arg-type]
+        SECRET_KEY=SecretStr("a-real-production-secret-key-value"),
+    )
 
     assert settings.is_production is expected
+
+
+def test_default_secret_key_is_rejected_in_production() -> None:
+    """A `SECRET_KEY` padrão de desenvolvimento não pode subir em produção.
+
+    Um JWT assinado com uma chave pública (versionada no repositório)
+    permitiria forjar tokens de acesso de qualquer usuário.
+    """
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, ENVIRONMENT="production")
+
+
+@pytest.mark.parametrize("environment", ["local", "development", "staging"])
+def test_default_secret_key_is_allowed_outside_production(environment: str) -> None:
+    """Fora de produção, a `SECRET_KEY` padrão é aceita (conveniência de dev)."""
+    settings = Settings(_env_file=None, ENVIRONMENT=environment)  # type: ignore[arg-type]
+
+    assert settings.SECRET_KEY.get_secret_value() == "insecure-dev-secret-change-me-in-production"
+
+
+def test_custom_secret_key_is_allowed_in_production() -> None:
+    """Uma `SECRET_KEY` customizada permite subir em produção normalmente."""
+    settings = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        SECRET_KEY=SecretStr("a-real-production-secret"),
+    )
+
+    assert settings.SECRET_KEY.get_secret_value() == "a-real-production-secret"

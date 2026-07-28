@@ -1,10 +1,12 @@
 # MarketPulse — Design System
 
-> **Status (Sprint 0):** nenhum componente foi implementado. A fundação do
-> frontend já entrega Tailwind CSS 4 configurado e quatro tokens de cor em
-> `frontend/src/styles/index.css` — o mínimo para a página temporária renderizar
-> em dark mode. A paleta completa, os tokens de tipografia e espaçamento e todos
-> os componentes listados abaixo são entregues na **Sprint 2**.
+> **Status (Sprint 1):** seis componentes mínimos foram implementados para
+> viabilizar as telas de autenticação — `Button`, `Input`, `PasswordInput`,
+> `Card` e `Logo` em `frontend/src/components/ui/`, e `AuthLayout` em
+> `frontend/src/components/layout/`. Junto, `frontend/src/styles/index.css`
+> ganhou tokens de borda, cor primária/de destaque e de erro. Nenhum outro
+> componente listado abaixo existe ainda — Sidebar, Header, Table, gráficos e
+> os demais chegam com a paleta completa na **Sprint 2**.
 
 ## Objetivo
 

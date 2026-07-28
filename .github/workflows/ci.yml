@@ -25,6 +25,30 @@ jobs:
   backend:
     name: Backend (lint, types, tests)
     runs-on: ubuntu-latest
+    services:
+      # A suíte roda contra SQLite por padrão (ver TEST_DATABASE_URL abaixo);
+      # o serviço real aqui garante que o mesmo código também funciona no
+      # dialeto de produção (tipos, migrations) e não só no de teste.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: marketpulse
+          POSTGRES_PASSWORD: marketpulse
+          POSTGRES_DB: marketpulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U marketpulse -d marketpulse"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://marketpulse:marketpulse@localhost:5432/marketpulse
+      POSTGRES_HOST: localhost
+      POSTGRES_USER: marketpulse
+      POSTGRES_PASSWORD: marketpulse
+      POSTGRES_DB: marketpulse
+      SECRET_KEY: ci-only-secret-key-not-used-in-production
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +73,14 @@ jobs:
       - name: MyPy (type checking)
         run: uv run mypy
 
-      - name: Pytest
+      - name: Alembic migration (upgrade + downgrade against real PostgreSQL)
+        working-directory: backend
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+
+      - name: Pytest (against real PostgreSQL)
         run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage artifact
