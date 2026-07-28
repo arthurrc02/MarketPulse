@@ -1,0 +1,17 @@
+MarketPulse — Product Vision
+
+O MarketPulse é uma plataforma SaaS desenvolvida para transformar relatórios de marketplaces em informações estratégicas para tomada de decisão. O objetivo do projeto é resolver um problema comum enfrentado por pequenos e médios vendedores: cada marketplace exporta seus dados em formatos diferentes, dificultando a consolidação das informações e a análise do desempenho do negócio.
+
+A plataforma permitirá que o usuário importe arquivos de diferentes marketplaces, como Shopee, Mercado Livre, Amazon e Magalu, nos formatos CSV e Excel. A partir desses arquivos, o sistema realizará automaticamente a padronização dos dados, armazenará todas as informações em um banco de dados e disponibilizará um dashboard moderno com indicadores, gráficos e insights sobre vendas, faturamento, produtos, categorias e desempenho por canal de venda.
+
+Diferentemente de um simples dashboard, o MarketPulse será desenvolvido para transmitir a sensação de um produto SaaS profissional. O foco será unir uma arquitetura sólida, boas práticas de desenvolvimento e uma interface visual moderna, inspirada em plataformas como Linear, Stripe, Clerk, Vercel e Supabase. A experiência do usuário será um dos principais diferenciais do projeto, com animações sutis, componentes reutilizáveis, identidade visual consistente e uma interface elegante desde as primeiras fases de desenvolvimento.
+
+A plataforma contará com autenticação completa utilizando JWT, permitindo cadastro, login e proteção de rotas. Cada usuário possuirá seu próprio ambiente de trabalho, visualizando apenas os dados que importou, simulando o funcionamento de um SaaS real sem adicionar a complexidade de múltiplas organizações ou permissões avançadas.
+
+O processamento dos dados seguirá uma arquitetura ETL (Extract, Transform, Load). Após o upload dos arquivos, o sistema identificará automaticamente o marketplace de origem, padronizará todas as informações para um único modelo de dados e armazenará os registros no PostgreSQL. Com a base consolidada, serão gerados indicadores como faturamento total, ticket médio, quantidade de pedidos, produtos mais vendidos, desempenho por marketplace, evolução temporal e distribuição por categorias.
+
+Além dos gráficos e indicadores, o MarketPulse possuirá um mecanismo de geração de insights baseado em regras de negócio. Em vez de utilizar inteligência artificial, o sistema analisará os dados importados e produzirá observações automáticas, como crescimento ou queda de faturamento, aumento do ticket médio, produtos em destaque, marketplaces com melhor desempenho e tendências relevantes para auxiliar na tomada de decisão.
+
+O projeto também servirá como demonstração técnica das competências adquiridas durante a graduação e em projetos pessoais, reunindo tecnologias modernas como FastAPI, React, TypeScript, PostgreSQL, SQLAlchemy, Docker, Pandas, React Query, Tailwind CSS, GitHub Actions e testes automatizados. Toda a aplicação será desenvolvida utilizando arquitetura em camadas, documentação contínua, integração contínua e boas práticas de engenharia de software.
+
+Mais do que um dashboard, o MarketPulse será apresentado como um produto completo, capaz de demonstrar conhecimentos em desenvolvimento full stack, engenharia de software, análise de dados, automação de processos e construção de aplicações SaaS modernas, tornando-se uma das principais peças do seu portfólio profissional.

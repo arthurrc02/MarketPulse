@@ -1,0 +1,26 @@
+@import 'tailwindcss';
+
+/*
+ * Sprint 0 (Foundation): apenas o mínimo para o Tailwind funcionar e a página
+ * temporária renderizar em dark mode. Os tokens completos e os componentes do
+ * Design System são entregues na Sprint 2.
+ */
+
+@theme {
+  --color-surface: oklch(0.17 0.015 265);
+  --color-surface-elevated: oklch(0.22 0.018 265);
+  --color-content: oklch(0.97 0.005 265);
+  --color-content-muted: oklch(0.72 0.015 265);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-content);
+    -webkit-font-smoothing: antialiased;
+  }
+}

@@ -1,0 +1,115 @@
+[project]
+name = "marketpulse"
+version = "0.1.0"
+description = "MarketPulse — plataforma SaaS de consolidação e análise de relatórios de marketplaces."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "marketpulse-backend",
+    "marketpulse-etl",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    # Starlette >= 1.3 depreca o uso de httpx 0.x no TestClient.
+    "httpx2>=2.0",
+    "pandas-stubs>=2.2",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["backend", "etl"]
+
+[tool.uv.sources]
+marketpulse-backend = { workspace = true }
+marketpulse-etl = { workspace = true }
+
+# ---------------------------------------------------------------------------
+# Ruff — lint + format (compartilhado por backend/ e etl/)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["backend", "etl"]
+extend-exclude = ["backend/migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "N",    # pep8-naming
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "B008", # necessário para Depends() em assinaturas do FastAPI
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "etl"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# MyPy — tipagem estática
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+files = ["backend/app", "backend/tests", "etl/etl", "etl/tests"]
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["alembic.*"]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["backend/tests", "etl/tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    # backend/tests e etl/tests coexistem no mesmo rootdir; o modo importlib
+    # evita a colisão de nomes entre os dois diretórios `tests`.
+    "--import-mode=importlib",
+]
+consider_namespace_packages = true
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["backend/app", "etl/etl"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

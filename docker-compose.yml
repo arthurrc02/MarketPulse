@@ -1,0 +1,73 @@
+name: marketpulse
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: marketpulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-marketpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marketpulse}
+      POSTGRES_DB: ${POSTGRES_DB:-marketpulse}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-marketpulse} -d ${POSTGRES_DB:-marketpulse}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: development
+    container_name: marketpulse-backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-marketpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marketpulse}
+      POSTGRES_DB: ${POSTGRES_DB:-marketpulse}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - '${BACKEND_PORT:-8000}:8000'
+    volumes:
+      # Bind mounts apenas do código-fonte: o virtualenv vive em /opt/venv e
+      # não é sobrescrito pelos mounts.
+      - ./backend:/app/backend
+      - ./etl:/app/etl
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      target: development
+    container_name: marketpulse-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      # Bind mounts não propagam eventos de filesystem; sem polling o HMR
+      # não detecta alterações feitas no host.
+      CHOKIDAR_USEPOLLING: 'true'
+    ports:
+      - '${FRONTEND_PORT:-5173}:5173'
+    volumes:
+      - ./frontend:/app
+      # Volume anônimo preserva o node_modules da imagem.
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
