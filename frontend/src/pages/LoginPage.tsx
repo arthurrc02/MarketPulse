@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { useAuth } from '@/hooks/useAuth'
+import { useToast } from '@/hooks/useToast'
 import { ApiError } from '@/lib/apiClient'
 
 interface LocationState {
@@ -14,6 +15,7 @@ interface LocationState {
 
 export function LoginPage() {
   const { login } = useAuth()
+  const { showToast } = useToast()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -28,6 +30,7 @@ export function LoginPage() {
     setIsSubmitting(true)
     try {
       await login({ email, password })
+      showToast({ variant: 'success', message: 'Bem-vindo de volta!' })
       const state = location.state as LocationState | null
       void navigate(state?.from?.pathname ?? '/app', { replace: true })
     } catch (err) {

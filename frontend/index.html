@@ -9,6 +9,18 @@
       content="MarketPulse — transforme relatórios de marketplaces em decisões estratégicas."
     />
     <title>MarketPulse</title>
+    <!--
+      Inter via Google Fonts: melhora a fidelidade visual com as referências do
+      Design System (Linear/Vercel/Stripe). Carregamento progressivo — sem
+      rede, o CSS já cai para a pilha padrão de fontes do sistema em
+      `--font-sans` (ver frontend/src/styles/index.css).
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="root"></div>

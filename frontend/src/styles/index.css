@@ -1,13 +1,26 @@
 @import 'tailwindcss';
 
 /*
- * Tokens mínimos: o suficiente para as telas de autenticação da Sprint 1
- * (Button, Input, PasswordInput, Card, Logo, AuthLayout). A paleta completa,
- * tipografia e espaçamento do Design System chegam na Sprint 2.
+ * Design System do MarketPulse — tokens completos (Sprint 2).
+ *
+ * Convenções de uso (ver docs/design-system.md para o catálogo de componentes):
+ *  - Superfícies: `surface` (fundo da página) → `surface-elevated` (cards,
+ *    inputs, popovers) → `surface-sunken` (sidebar, áreas de destaque leve).
+ *  - Raio: `rounded-lg`/`rounded-xl` em controles (Button, Input, Badge),
+ *    `rounded-2xl` em contêineres (Card, Modal, Dropdown).
+ *  - Sombra: `shadow-lg`/`shadow-2xl` com `shadow-black/20-30` — nunca cores
+ *    de sombra fora de preto translúcido, para manter o alto contraste do
+ *    dark mode.
+ *  - Cores semânticas (`success`/`danger`) usam a paleta padrão do Tailwind
+ *    (emerald/red) diretamente — só `primary` e neutros ganharam tokens
+ *    próprios, para não duplicar o que o Tailwind já oferece.
  */
 
 @theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
   --color-surface: oklch(0.17 0.015 265);
+  --color-surface-sunken: oklch(0.14 0.015 265);
   --color-surface-elevated: oklch(0.22 0.018 265);
   --color-content: oklch(0.97 0.005 265);
   --color-content-muted: oklch(0.72 0.015 265);
@@ -20,7 +33,19 @@
   --color-primary-foreground: oklch(0.99 0.005 280);
 
   --color-danger: oklch(0.63 0.22 25);
+  --color-danger-hover: oklch(0.68 0.22 25);
   --color-danger-foreground: oklch(0.98 0.01 25);
+
+  --animate-fade-in: fade-in 0.15s ease-out;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 @layer base {
@@ -31,6 +56,14 @@
   body {
     background-color: var(--color-surface);
     color: var(--color-content);
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+
+  /* Navegadores baseados em WebKit/Blink não seguem `outline` em <select> tão
+     bem quanto outros controles; o anel de foco customizado dos componentes
+     já cobre isso, então o outline nativo do navegador é dispensado aqui. */
+  :focus-visible {
+    outline-color: var(--color-border-focus);
   }
 }

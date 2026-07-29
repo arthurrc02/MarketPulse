@@ -49,8 +49,8 @@ ETL Engine (Pandas)
 - React Router
 - React Query
 - Tailwind CSS 4
+- Framer Motion
 - Recharts (Sprint 5)
-- Framer Motion (Sprint 2)
 
 ### ETL
 
@@ -189,15 +189,18 @@ Os componentes deverão ser reutilizáveis sempre que possível.
 
 ### Mapeamento para o código
 
-| Camada     | Diretório          | Responsabilidade                                                |
-| ---------- | ------------------ | ------------------------------------------------------------------ |
-| Pages      | `src/pages/`       | Telas completas.                                                    |
-| Routes     | `src/routes/`      | Definição de rotas e guards (`ProtectedRoute`, `PublicOnlyRoute`).  |
-| Context    | `src/context/`     | Estado global (`AuthContext`/`AuthProvider`).                       |
-| Components | `src/components/`  | Design System e componentes reutilizáveis — só os da Sprint 1 (auth) até aqui; o restante chega na Sprint 2. |
-| Hooks      | `src/hooks/`       | `useAuth`; consultas ao React Query chegam na Sprint 2.             |
-| Lib        | `src/lib/`         | `apiClient`, `auth/api`, `auth/tokenStore`, QueryClient, `env`.     |
-| Styles     | `src/styles/`      | Tokens e camadas base do Tailwind.                                  |
+| Camada     | Diretório                | Responsabilidade                                                |
+| ---------- | ------------------------- | ------------------------------------------------------------------ |
+| Pages      | `src/pages/`              | Telas completas.                                                    |
+| Routes     | `src/routes/`             | Definição de rotas e guards (`ProtectedRoute`, `PublicOnlyRoute`).  |
+| Context    | `src/context/`            | Estado global (`AuthContext`/`AuthProvider`, `ToastContext`/`ToastProvider`). |
+| Components | `src/components/ui/`      | Design System: primitivos reutilizáveis (ver [design-system.md](design-system.md)). |
+| Components | `src/components/layout/`  | `AppLayout`, `Sidebar`, `Header`, `PageContainer`, `Section`, `AuthLayout`. |
+| Components | `src/components/icons/`   | Catálogo único de ícones SVG (`Icons.tsx`).                         |
+| Hooks      | `src/hooks/`              | `useAuth`, `useToast`. Consultas ao React Query chegam com o primeiro dado real (Sprint 3+). |
+| Lib        | `src/lib/`                | `apiClient`, `auth/api`, `auth/tokenStore`, QueryClient, `env`.     |
+| Styles     | `src/styles/`             | Tokens e camadas base do Tailwind (ver design-system.md).           |
+| Test       | `src/test/`               | Setup do Vitest e `renderWithProviders` (helper de testes).         |
 
 O alias `@/` aponta para `src/`, configurado tanto no Vite quanto no TypeScript.
 
@@ -235,13 +238,36 @@ Backend
 | `AuthContext` / `AuthProvider`      | `src/context/`                           | Estado de sessão + bootstrap (ver acima).                       |
 | `useAuth`                            | `src/hooks/useAuth.ts`                   | Hook de acesso ao contexto.                                     |
 | `ProtectedRoute` / `PublicOnlyRoute` | `src/routes/`                            | Guards de rota.                                                 |
-| `Button`, `Input`, `PasswordInput`, `Card`, `Logo` | `src/components/ui/`     | Componentes mínimos da Sprint 1 (auth). Design System completo na Sprint 2. |
+| `Button`, `Input`, `PasswordInput`, `Card`, `Logo` | `src/components/ui/`     | Componentes de autenticação (Sprint 1).                        |
 | `AuthLayout`                         | `src/components/layout/`                 | Layout compartilhado por login e cadastro.                      |
 
 O access token nunca é persistido (só em memória); o refresh token vai para
 `localStorage` porque precisa sobreviver a um reload — é o que torna
 "permanecer autenticado" possível (ver
 [ADR-023](decisions.md#adr-023--sessão-do-frontend-access-token-em-memória-refresh-token-em-localstorage)).
+
+---
+
+## Design System e navegação protegida (Sprint 2)
+
+Catálogo completo de componentes, tokens e convenções visuais em
+[design-system.md](design-system.md). Aqui, apenas como as rotas protegidas se
+encaixam:
+
+```text
+/app          (layout route: ProtectedRoute → AppLayout)
+├── index         → DashboardPage      (KPICards placeholder + EmptyState)
+├── uploads        → UploadsPage        (EmptyState — Sprint 3)
+├── analytics       → AnalyticsPage       (EmptyState — Sprint 5)
+├── insights        → InsightsPage        (EmptyState — Sprint 6)
+└── settings        → SettingsPage        (Tabs: Perfil/Preferências/Segurança)
+```
+
+`AppLayout` renderiza `Sidebar` + `Header` + `<Outlet />`; cada página nova
+sob `/app` só precisa de uma rota filha — não repete layout, sidebar ou
+header. `ToastProvider` envolve toda a árvore (acima do `BrowserRouter`, para
+sobreviver a navegações) e é usado hoje em login, cadastro e logout
+bem-sucedidos.
 
 ---
 
@@ -341,3 +367,8 @@ consequências, estão registradas em [decisions.md](decisions.md).
 
 Endpoints, contratos de requisição/resposta e o fluxo completo de
 autenticação estão documentados em [api.md](api.md).
+
+## Design System
+
+Catálogo de componentes, tokens visuais e convenções de acessibilidade em
+[design-system.md](design-system.md).

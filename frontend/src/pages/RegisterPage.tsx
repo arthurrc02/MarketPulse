@@ -6,10 +6,12 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
 import { useAuth } from '@/hooks/useAuth'
+import { useToast } from '@/hooks/useToast'
 import { ApiError } from '@/lib/apiClient'
 
 export function RegisterPage() {
   const { register } = useAuth()
+  const { showToast } = useToast()
   const navigate = useNavigate()
 
   const [email, setEmail] = useState('')
@@ -30,6 +32,7 @@ export function RegisterPage() {
     setIsSubmitting(true)
     try {
       await register({ email, password })
+      showToast({ variant: 'success', message: 'Conta criada com sucesso!' })
       void navigate('/app', { replace: true })
     } catch (err) {
       setError(

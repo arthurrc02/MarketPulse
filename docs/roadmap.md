@@ -4,8 +4,8 @@
 | ------ | ----------------------------------- | ------------ |
 | 0      | Foundation                          | ✅ Concluída |
 | 1      | Authentication                      | ✅ Concluída |
-| 2      | Design System & Frontend Foundation | ⏳ Próxima   |
-| 3      | File Import                         | ⬜ Planejada |
+| 2      | Design System & Frontend Foundation | ✅ Concluída |
+| 3      | File Import                         | ⏳ Próxima   |
 | 4      | ETL Engine                          | ⬜ Planejada |
 | 5      | Analytics Dashboard                 | ⬜ Planejada |
 | 6      | Business Insights                   | ⬜ Planejada |
@@ -83,26 +83,52 @@ insights, integrações com marketplaces, Design System completo.
 
 ---
 
-## Sprint 2 — Design System & Frontend Foundation ⏳
+## Sprint 2 — Design System & Frontend Foundation ✅
 
-**Objetivo:** identidade visual e componentes reutilizáveis.
+**Objetivo:** identidade visual e componentes reutilizáveis — sem nenhuma
+funcionalidade de negócio.
 
-**Escopo previsto:**
+**Entregue:**
 
-- Paleta completa e tokens de tipografia, espaçamento e raio em `@theme`
-  (os tokens da Sprint 1 — cor primária, borda, erro — são o ponto de
-  partida, não um recomeço).
-- Componentes de layout (AppLayout, Sidebar, Header, PageContainer, Section)
-  e os demais catálogos descritos em [design-system.md](design-system.md).
-- Framer Motion para transições de página e micro animações.
-- Hooks de React Query para dados de negócio (a base do React Query já está
-  configurada desde a Sprint 0).
-- Reavaliação de hooks de pré-commit (`pre-commit` / `lint-staged`), adiados na
-  Sprint 0 (ADR-009).
+- Tokens completos em `@theme`: superfícies em camadas (`surface` →
+  `surface-elevated`/`surface-sunken`), tipografia (Inter + fallback),
+  animação (`fade-in`). Cores semânticas de sucesso/erro reaproveitam a
+  paleta padrão do Tailwind — não duplicam tokens que o framework já oferece.
+- **18 componentes próprios** (sem bibliotecas de UI prontas — ver
+  [ADR-027](decisions.md#adr-027--design-system-com-componentes-próprios-sem-bibliotecas-de-ui)):
+  `IconButton`, `SearchInput`, `Select`, `Checkbox`, `Badge`, `KPICard`,
+  `Modal`, `Dialog`, `Dropdown`, `Tooltip`, `Tabs`, `EmptyState`, `Skeleton`,
+  `Spinner` (extraído do `Button` da Sprint 1, eliminando duplicação), além
+  de `Button` ganhando a variante `danger`.
+- Componentes de layout: `AppLayout`, `Sidebar` (coluna fixa/gaveta mobile),
+  `Header` (busca placeholder, menu de conta), `PageContainer`, `Section`.
+- Catálogo único de ícones SVG consistentes (`components/icons/Icons.tsx`).
+- Sistema de notificações (`ToastContext`/`ToastProvider`/`useToast`),
+  disparado em login, cadastro e logout bem-sucedidos.
+- Dashboard real (sidebar + header + KPICards placeholder + EmptyState),
+  substituindo a página protegida mínima da Sprint 1.
+- Navegação preparada: `/app/uploads`, `/app/analytics`, `/app/insights`
+  (EmptyState apontando a sprint de cada funcionalidade) e `/app/settings`
+  (Tabs Perfil/Preferências/Segurança, com Select e Checkbox de exemplo).
+- Framer Motion usado seletivamente (Modal, Dropdown, Tooltip, Toast, gaveta
+  da Sidebar) — não em toda transição de página.
+- Responsivo: Sidebar vira gaveta abaixo de `lg`, grids de KPICard colapsam
+  em telas menores.
+- Acessibilidade revisada: navegação por teclado em Tabs/Modal/Dropdown,
+  `aria-label` obrigatório em `IconButton`/`SearchInput` (erro de tipo sem
+  ele), foco devolvido ao fechar modais, papéis ARIA corretos em todos os
+  componentes interativos.
+- 105 testes de frontend (era 21 na Sprint 1): componentes do Design System,
+  Sidebar, Header (incluindo a confirmação de logout), AppLayout, navegação
+  aninhada e páginas placeholder.
+
+**Fora de escopo (por decisão):** upload de arquivos, ETL, analytics,
+insights, integrações com marketplaces, gráficos reais, qualquer dado real —
+todos os cards e páginas de negócio permanecem placeholders.
 
 ---
 
-## Sprint 3 — File Import ⬜
+## Sprint 3 — File Import ⏳
 
 **Objetivo:** upload de arquivos CSV e Excel.
 
@@ -111,7 +137,8 @@ insights, integrações com marketplaces, Design System completo.
 - Endpoint de upload com validação de formato e tamanho.
 - Armazenamento dos arquivos e registro de importações.
 - Detecção automática do marketplace de origem.
-- Componente `FileUpload` com feedback de progresso.
+- Componente `FileUpload` com feedback de progresso (Design System).
+- A `UploadsPage` (hoje um `EmptyState`) passa a ter o fluxo real.
 - Endpoint `GET /ready` (readiness), verificando conexão com o banco (ADR-002).
 
 ---

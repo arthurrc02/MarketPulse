@@ -1,42 +1,40 @@
-import { useState } from 'react'
-
-import { Button } from '@/components/ui/Button'
-import { Logo } from '@/components/ui/Logo'
+import { Badge } from '@/components/ui/Badge'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { KPICard } from '@/components/ui/KPICard'
+import { PageContainer } from '@/components/layout/PageContainer'
+import { Section } from '@/components/layout/Section'
 import { useAuth } from '@/hooks/useAuth'
 
+const IMPORT_HINT = 'Disponível após a primeira importação de relatório (Sprint 3 em diante).'
+
 /**
- * Página protegida temporária da Sprint 1.
- *
- * Substituída pelo dashboard real na Sprint 5 (Analytics Dashboard) — nenhum
- * gráfico ou indicador pertence a esta sprint.
+ * Estrutura real do dashboard (Sprint 2) — apenas placeholders visuais.
+ * Os indicadores de negócio chegam com o Analytics Dashboard (Sprint 5).
  */
 export function DashboardPage() {
-  const { user, logout } = useAuth()
-  const [isLoggingOut, setIsLoggingOut] = useState(false)
-
-  async function handleLogout(): Promise<void> {
-    setIsLoggingOut(true)
-    try {
-      await logout()
-    } finally {
-      setIsLoggingOut(false)
-    }
-  }
+  const { user } = useAuth()
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="border-border flex items-center justify-between border-b px-6 py-4">
-        <Logo />
-        <Button variant="secondary" onClick={() => void handleLogout()} isLoading={isLoggingOut}>
-          Sair
-        </Button>
-      </header>
-      <main className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-        <h1 className="text-content text-3xl font-semibold tracking-tight">
-          Bem-vindo ao MarketPulse.
-        </h1>
-        {user && <p className="text-content-muted text-sm">Conectado como {user.email}</p>}
-      </main>
-    </div>
+    <PageContainer>
+      <Section
+        title="Bem-vindo ao MarketPulse."
+        description={user ? `Conectado como ${user.email}` : ''}
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KPICard label="Faturamento" value="—" hint={IMPORT_HINT} />
+          <KPICard label="Pedidos" value="—" hint={IMPORT_HINT} />
+          <KPICard label="Ticket médio" value="—" hint={IMPORT_HINT} />
+          <KPICard label="Produtos ativos" value="—" hint={IMPORT_HINT} />
+        </div>
+      </Section>
+
+      <Section title="Atividade recente" className="mt-10">
+        <EmptyState
+          title="Nenhuma atividade ainda"
+          description="Assim que você importar seu primeiro relatório, o resumo aparece aqui."
+          badge={<Badge variant="primary">Disponível na Sprint 3</Badge>}
+        />
+      </Section>
+    </PageContainer>
   )
 }

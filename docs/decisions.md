@@ -583,3 +583,198 @@ arquivo em filesystems case-insensitive (Windows, macOS padrão). Ao criar
 outros contextos React no projeto (nenhum previsto antes da Sprint 3), seguir
 o mesmo padrão: nomes de arquivo que diferem por mais do que a capitalização
 da primeira letra.
+
+---
+
+## ADR-027 — Design System com componentes próprios, sem bibliotecas de UI
+
+**Sprint:** 2 · **Status:** Aceita
+
+**Contexto.** Bibliotecas como shadcn/ui, Radix, Material UI ou Chakra UI
+resolveriam boa parte do catálogo (Modal, Dropdown, Tabs, Tooltip) mais
+rápido, com acessibilidade já testada por uma comunidade grande.
+
+**Decisão.** Todos os 18 componentes desta sprint são implementados do zero,
+usando apenas React, Tailwind CSS e Framer Motion (já previstos na stack).
+Nenhuma biblioteca de componentes prontos foi adicionada.
+
+**Alternativas descartadas.**
+
+- _shadcn/ui_: gera código copiado para o repositório (não é uma dependência
+  tradicional), o que reduziria parte do argumento de "vendor lock-in" — mas
+  ainda assim o visual sairia reconhecível como "um projeto shadcn", diluindo
+  a identidade visual própria que o projeto busca (inspirações da
+  `design-system.md`, não cópia).
+- _Radix Primitives (sem estilo) + Tailwind_: teria acelerado a acessibilidade
+  de Modal/Dropdown/Tabs, mas o objetivo explícito desta sprint é demonstrar
+  domínio de composição de componentes em React puro — terceirizar justamente
+  essa parte anularia o propósito da sprint.
+
+**Consequências.** Mais código escrito à mão (~20 arquivos de componente) e
+responsabilidade total pela acessibilidade de cada um — testada
+explicitamente (ver a suíte de 105 testes de frontend). Como contrapartida, a
+UI tem identidade visual própria e cada componente é auditável e ajustável
+sem lidar com a API de uma lib externa. Padrões avançados de acessibilidade
+(navegação por setas em menus, colisão de tooltip) foram conscientemente
+simplificados — ver ADR-030 e ADR-031.
+
+---
+
+## ADR-028 — Inter via Google Fonts, com fallback progressivo
+
+**Sprint:** 2 · **Status:** Aceita
+
+**Contexto.** As referências visuais do projeto (Linear, Vercel, Stripe) usam
+tipografia geométrica moderna — a pilha padrão `system-ui` do Tailwind (San
+Francisco/Segoe UI/Roboto conforme o SO) já é neutra e legível, mas não
+reproduz essa identidade visual específica.
+
+**Decisão.** `index.html` carrega Inter via `<link>` do Google Fonts
+(`font-display: swap`), e `--font-sans` no `@theme` lista `'Inter'` antes da
+pilha `ui-sans-serif, system-ui, ...`.
+
+**Alternativas descartadas.**
+
+- _Self-host da fonte (arquivo `.woff2` no repositório)_: elimina a
+  dependência de rede em runtime, mas adiciona binário ao repositório e
+  gestão de licença/versão manual — desproporcional para uma única família
+  tipográfica nesta fase do projeto.
+
+**Consequências.** Título e textos usam Inter quando há rede; sem rede (ou
+com o carregamento ainda em andamento), o `font-display: swap` evita texto
+invisível e cai educadamente para a pilha do sistema — a aplicação nunca
+depende da fonte para funcionar.
+
+---
+
+## ADR-029 — `Select` como `<select>` nativo estilizado, não um listbox customizado
+
+**Sprint:** 2 · **Status:** Aceita
+
+**Contexto.** Um listbox customizado (popup próprio, `role="listbox"`,
+roving tabindex, busca por digitação) dá mais controle visual sobre cada
+`<option>`, mas replica uma quantidade grande de comportamento que o
+`<select>` nativo já implementa corretamente — teclado, leitor de tela,
+comportamento mobile (abre o seletor nativo do SO em vez de um popup web).
+
+**Decisão.** `Select` estiliza um `<select>` nativo (borda, fundo, ícone de
+chevron sobreposto) em vez de construir um listbox próprio.
+
+**Alternativas descartadas.**
+
+- _Listbox customizado_: mais fiel ao design em telas grandes, mas cada
+  comportamento reimplementado (teclado, `aria-activedescendant`, fechamento
+  em blur/Esc/clique fora) é mais uma superfície de falha de acessibilidade
+  para testar e manter — desproporcional a esta sprint, que ainda não tem
+  nenhum `Select` com lista longa ou busca.
+
+**Consequências.** Acessibilidade garantida "de graça" pelo navegador; em
+troca, o estilo das `<option>` individuais segue a renderização nativa do
+SO/navegador (não é possível aplicar o Design System dentro do popup nativo)
+— um trade-off visual aceito conscientemente, documentado aqui para não ser
+"redescoberto" como bug depois.
+
+---
+
+## ADR-030 — `Tooltip` com posicionamento fixo, sem detecção de colisão
+
+**Sprint:** 2 · **Status:** Aceita
+
+**Contexto.** Um tooltip que sempre abre no mesmo lado (`top` por padrão)
+pode ficar cortado pela borda da viewport em telas pequenas ou perto da
+borda. Bibliotecas como Floating UI resolvem isso com detecção de colisão e
+"flip" automático de lado.
+
+**Decisão.** `Tooltip` aceita um prop `side` (`'top' | 'bottom'`) definido
+pelo desenvolvedor no call site, sem detecção automática de colisão.
+
+**Alternativas descartadas.**
+
+- _Adicionar `@floating-ui/react`_: resolveria o problema de forma robusta,
+  mas é exatamente o tipo de dependência que a sprint pediu para evitar
+  (biblioteca pronta assumindo uma responsabilidade de UI) — desproporcional
+  para os dois usos atuais (ícone de info em `KPICard`, item de navegação),
+  ambos longe da borda da viewport.
+
+**Consequências.** Funciona bem para os usos atuais. Se um `Tooltip` futuro
+precisar aparecer perto da borda da tela, listado como melhoria futura no
+relatório da sprint.
+
+---
+
+## ADR-031 — `Dropdown` sem navegação por setas entre itens
+
+**Sprint:** 2 · **Status:** Aceita
+
+**Contexto.** O padrão completo de "menu button" do WAI-ARIA prevê que, com o
+menu aberto, as setas para cima/baixo movam o foco entre os itens (roving
+tabindex), Home/End pulem para o primeiro/último item, e digitar uma letra
+pule para o item correspondente.
+
+**Decisão.** `Dropdown` implementa apenas fechar em Esc e em clique fora; a
+navegação entre itens é feita via Tab (cada item é um `<button>` real,
+focável na ordem natural do DOM).
+
+**Alternativas descartadas.**
+
+- _Roving tabindex completo_: mais fiel ao padrão ARIA, mas o único uso atual
+  (menu de conta no `Header`, com dois itens) não justifica a complexidade —
+  o ganho de usabilidade real é marginal com tão poucos itens.
+
+**Consequências.** Uso por teclado funciona (Tab alcança os itens, Enter/Espaço
+ativa), mas não segue a expectativa de "setas navegam o menu" que usuários de
+leitor de tela avançados podem ter. Listado como melhoria futura — relevante
+se um `Dropdown` futuro tiver uma lista longa de itens.
+
+---
+
+## ADR-032 — Toast é responsabilidade da página, não do `AuthContext`
+
+**Sprint:** 2 · **Status:** Aceita
+
+**Contexto.** Era possível disparar o toast de "login bem-sucedido" dentro de
+`AuthContext.login()`, centralizando o efeito colateral junto da lógica de
+autenticação.
+
+**Decisão.** `AuthContext` permanece agnóstico de UI (como já era desde a
+Sprint 1); `LoginPage`, `RegisterPage` e `Header` (logout) chamam
+`useToast().showToast(...)` explicitamente, depois de `await login(...)` /
+`register(...)` / `logout(...)` resolverem.
+
+**Alternativas descartadas.**
+
+- _Toast disparado dentro do `AuthContext`_: acoplaria a camada de estado de
+  autenticação a uma decisão de apresentação (texto da mensagem, variante de
+  cor) — o mesmo racional de camadas já aplicado no backend (ADR-004):
+  serviço não deveria conhecer a UI que o consome.
+
+**Consequências.** `AuthContext.test.tsx` continua testável sem
+`ToastProvider` (context isolado). Cada página decide sua própria mensagem de
+sucesso — nem toda chamada de `login`/`register`/`logout` precisa,
+necessariamente, do mesmo texto no futuro.
+
+---
+
+## ADR-033 — `/app` como rota de layout aninhada (`AppLayout` + `<Outlet />`)
+
+**Sprint:** 2 · **Status:** Aceita
+
+**Contexto.** A Sprint 1 tinha uma única rota protegida (`/app` →
+`DashboardPage`, sem layout compartilhado). Esta sprint adiciona quatro
+páginas nesse mesmo espaço protegido (Uploads, Analytics, Insights,
+Settings), todas precisando da mesma Sidebar e Header.
+
+**Decisão.** `/app` passa a ser uma rota de layout: `ProtectedRoute` envolve
+`AppLayout`, que renderiza `Sidebar` + `Header` + `<Outlet />`; as cinco
+páginas viram rotas filhas (`index`, `uploads`, `analytics`, `insights`,
+`settings`), sem repetir layout nenhum.
+
+**Alternativas descartadas.**
+
+- _Cada página import a própria Sidebar/Header_: duplicaria o layout em cinco
+  arquivos e tornaria fácil um deles divergir visualmente com o tempo.
+
+**Consequências.** Adicionar uma página protegida nova (Sprint 3+) é só
+acrescentar uma rota filha — nenhum arquivo de layout muda. `AppLayout`
+também centraliza o estado da gaveta mobile da Sidebar (fecha sozinha a cada
+navegação), que seria estranho de replicar por página.

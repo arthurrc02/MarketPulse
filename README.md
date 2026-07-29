@@ -9,10 +9,12 @@ negócio. O MarketPulse importa arquivos CSV e Excel de **Shopee, Mercado Livre,
 Amazon e Magalu**, padroniza tudo em um único modelo de dados e apresenta
 indicadores, gráficos e insights automáticos em um dashboard moderno.
 
-> **Status:** Sprint 1 (Authentication) concluída. Cadastro, login, sessão
-> persistente, rotas protegidas e logout já funcionam de ponta a ponta;
-> nenhuma funcionalidade de negócio (marketplaces, upload, ETL, dashboard)
-> existe ainda — começam na Sprint 3 em diante.
+> **Status:** Sprint 2 (Design System & Frontend Foundation) concluída. Além
+> da autenticação completa (Sprint 1), o produto agora tem identidade visual
+> própria: Design System com 18 componentes, dashboard real (sidebar, header,
+> cards de exemplo) e navegação preparada para Uploads, Analytics, Insights e
+> Configurações. Nenhuma funcionalidade de negócio (marketplaces, upload,
+> ETL, dados reais) existe ainda — começam na Sprint 3 em diante.
 
 ---
 
@@ -21,7 +23,7 @@ indicadores, gráficos e insights automáticos em um dashboard moderno.
 | Camada             | Tecnologias                                                                 |
 | ------------------ | --------------------------------------------------------------------------- |
 | **Backend**        | Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · Pydantic v2 · PostgreSQL 16 · PyJWT · bcrypt |
-| **Frontend**       | React 19 · TypeScript · Vite · Tailwind CSS 4 · React Router · React Query   |
+| **Frontend**       | React 19 · TypeScript · Vite · Tailwind CSS 4 · React Router · React Query · Framer Motion |
 | **ETL**            | Pandas · OpenPyXL                                                           |
 | **Infraestrutura** | Docker · Docker Compose · GitHub Actions                                     |
 | **Qualidade**      | Ruff · MyPy (strict) · Pytest · ESLint · Prettier · Vitest                   |
@@ -60,7 +62,7 @@ estão em **[docs/setup.md](docs/setup.md)**; os endpoints disponíveis em
 ```text
 backend/     API FastAPI em camadas (api → services → repositories → db)
 etl/         Motor ETL (extractors, transformers, loaders)
-frontend/    Aplicação React + TypeScript — login, cadastro e sessão já funcionam
+frontend/    React + TypeScript — auth completa, Design System, dashboard e navegação
 docker/      Dockerfiles e configuração do Nginx
 docs/        Documentação do projeto
 .github/     Pipelines de CI
@@ -109,8 +111,8 @@ somadas ao build das imagens Docker de produção.
 | ------ | ----------------------------------- | ------------ |
 | 0      | Foundation                          | ✅ Concluída |
 | 1      | Authentication                      | ✅ Concluída |
-| 2      | Design System & Frontend Foundation | ⏳ Próxima   |
-| 3      | File Import                         | ⬜ Planejada |
+| 2      | Design System & Frontend Foundation | ✅ Concluída |
+| 3      | File Import                         | ⏳ Próxima   |
 | 4      | ETL Engine                          | ⬜ Planejada |
 | 5      | Analytics Dashboard                 | ⬜ Planejada |
 | 6      | Business Insights                   | ⬜ Planejada |

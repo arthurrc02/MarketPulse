@@ -1,30 +1,23 @@
-import { render, screen } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
-import { AuthContext, type AuthContextValue } from '@/context/authContextDefinition'
+import type { AuthContextValue } from '@/context/authContextDefinition'
 import { ApiError } from '@/lib/apiClient'
 import { RegisterPage } from '@/pages/RegisterPage'
+import { renderWithProviders } from '@/test/renderWithProviders'
 
 function renderRegisterPage(register: AuthContextValue['register']) {
-  const value: AuthContextValue = {
-    status: 'unauthenticated',
-    user: null,
-    login: vi.fn(),
-    register,
-    logout: vi.fn(),
-  }
-
-  return render(
-    <MemoryRouter initialEntries={['/register']}>
-      <AuthContext.Provider value={value}>
-        <Routes>
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/app" element={<div>DASHBOARD_MARKER</div>} />
-        </Routes>
-      </AuthContext.Provider>
-    </MemoryRouter>,
+  return renderWithProviders(
+    <Routes>
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/app" element={<div>DASHBOARD_MARKER</div>} />
+    </Routes>,
+    {
+      authValue: { status: 'unauthenticated', user: null, register },
+      initialEntries: ['/register'],
+    },
   )
 }
 
@@ -43,7 +36,7 @@ describe('RegisterPage', () => {
     expect(register).not.toHaveBeenCalled()
   })
 
-  it('registers and navigates to /app on success', async () => {
+  it('registers, shows a success toast and navigates to /app on success', async () => {
     const register = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     renderRegisterPage(register)
@@ -54,6 +47,7 @@ describe('RegisterPage', () => {
     await user.click(screen.getByRole('button', { name: 'Criar conta' }))
 
     expect(register).toHaveBeenCalledWith({ email: 'user@example.com', password: 'Sup3rSecret!' })
+    expect(await screen.findByText('Conta criada com sucesso!')).toBeInTheDocument()
     expect(await screen.findByText('DASHBOARD_MARKER')).toBeInTheDocument()
   })
 

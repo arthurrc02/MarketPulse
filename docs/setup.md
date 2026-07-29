@@ -39,14 +39,17 @@ MarketPulse/
 │   └── tests/
 ├── frontend/           # Aplicação React + TypeScript + Vite
 │   └── src/
-│       ├── context/    # AuthContext / AuthProvider
-│       ├── hooks/      # useAuth
-│       ├── components/ # ui/ (Button, Input, PasswordInput, Card, Logo) + layout/ (AuthLayout)
+│       ├── context/    # AuthContext, ToastContext (+ Provider de cada)
+│       ├── hooks/      # useAuth, useToast
+│       ├── components/
+│       │   ├── ui/       # Design System: Button, Input, Select, Modal, Dropdown, Tabs...
+│       │   ├── layout/   # AppLayout, Sidebar, Header, PageContainer, Section, AuthLayout
+│       │   └── icons/    # Catálogo único de ícones SVG
 │       ├── lib/        # apiClient, auth/api, auth/tokenStore, QueryClient, env
-│       ├── pages/      # LoginPage, RegisterPage, DashboardPage
+│       ├── pages/      # Login, Register, Dashboard, Uploads, Analytics, Insights, Settings
 │       ├── routes/     # AppRoutes, ProtectedRoute, PublicOnlyRoute
-│       ├── styles/     # Tailwind
-│       └── test/       # Setup do Vitest
+│       ├── styles/     # Tokens do Design System (Tailwind @theme)
+│       └── test/       # Setup do Vitest + renderWithProviders
 ├── docker/             # Dockerfiles e configuração do Nginx
 ├── docs/               # Documentação do projeto
 ├── .github/workflows/  # Pipelines de CI
@@ -219,7 +222,10 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
 ```
 
 O frontend em http://localhost:5173 deve exibir a tela de login; após
-cadastro/login, a página protegida temporária com "Bem-vindo ao MarketPulse."
+cadastro/login, o dashboard real (sidebar, header e cards de exemplo) com
+"Bem-vindo ao MarketPulse." — navegue por Uploads, Analytics, Insights e
+Configurações pela barra lateral para ver os placeholders de cada
+funcionalidade futura.
 
 ---
 
@@ -274,3 +280,9 @@ Confirme que o header é `Authorization: Bearer <access_token>` (não
 `refresh_token>`) e que o access token não passou de 15 minutos — depois
 disso, é preciso renovar via `POST /auth/refresh` (o frontend faz isso
 automaticamente).
+
+**A interface aparece sem a fonte Inter (cai para a fonte do sistema)**
+Comportamento esperado sem acesso à internet — `index.html` carrega a Inter
+via Google Fonts com `font-display: swap`; sem rede, o CSS já cai para
+`ui-sans-serif`/`system-ui` (ver [ADR-028](decisions.md#adr-028--inter-via-google-fonts-com-fallback-progressivo)).
+Não é um erro a corrigir.

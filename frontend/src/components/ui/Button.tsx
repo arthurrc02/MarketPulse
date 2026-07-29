@@ -1,6 +1,8 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react'
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost'
+import { Spinner } from '@/components/ui/Spinner'
+
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
@@ -14,6 +16,7 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   secondary:
     'bg-surface-elevated text-content border border-border hover:border-border-focus focus-visible:outline-primary',
   ghost: 'bg-transparent text-content-muted hover:text-content focus-visible:outline-primary',
+  danger: 'bg-danger text-danger-foreground hover:bg-danger-hover focus-visible:outline-danger',
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -42,22 +45,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ].join(' ')}
       {...props}
     >
-      {isLoading && <SpinnerIcon className="h-4 w-4 animate-spin" />}
+      {isLoading && <Spinner className="h-4 w-4" />}
       {children}
     </button>
   )
 })
-
-function SpinnerIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
-      <path
-        d="M22 12a10 10 0 0 0-10-10"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}

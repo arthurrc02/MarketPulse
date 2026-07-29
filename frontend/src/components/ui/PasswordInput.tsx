@@ -1,5 +1,7 @@
 import { forwardRef, useId, useState, type InputHTMLAttributes } from 'react'
 
+import { EyeIcon, EyeOffIcon } from '@/components/icons/Icons'
+
 type PasswordInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & {
   label: string
   error?: string
@@ -52,29 +54,3 @@ export const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
     )
   },
 )
-
-function EyeIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  )
-}
-
-function EyeOffIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.24 4.24M9.4 5.5A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a13.6 13.6 0 0 1-3.1 3.9M6.6 6.6C4.3 8.1 2 12 2 12a13.6 13.6 0 0 0 5.1 5.4"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}

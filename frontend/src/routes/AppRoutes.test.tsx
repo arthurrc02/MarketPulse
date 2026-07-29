@@ -1,38 +1,22 @@
-import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import {
-  AuthContext,
-  type AuthContextValue,
-  type AuthStatus,
-} from '@/context/authContextDefinition'
+import type { AuthStatus } from '@/context/authContextDefinition'
 import { AppRoutes } from '@/routes/AppRoutes'
+import { SAMPLE_USER, renderWithProviders } from '@/test/renderWithProviders'
 
 function renderAppRoutes(status: AuthStatus, initialEntries: string[]) {
-  const value: AuthContextValue = {
-    status,
-    user:
-      status === 'authenticated'
-        ? {
-            id: '1',
-            email: 'user@example.com',
-            isActive: true,
-            createdAt: '2026-01-01T00:00:00Z',
-          }
-        : null,
-    login: vi.fn(),
-    register: vi.fn(),
-    logout: vi.fn(),
-  }
-
-  return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <AuthContext.Provider value={value}>
-        <AppRoutes />
-      </AuthContext.Provider>
-    </MemoryRouter>,
-  )
+  return renderWithProviders(<AppRoutes />, {
+    authValue: {
+      status,
+      user: status === 'authenticated' ? SAMPLE_USER : null,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    },
+    initialEntries,
+  })
 }
 
 describe('AppRoutes', () => {
@@ -50,10 +34,12 @@ describe('AppRoutes', () => {
     ).toBeInTheDocument()
   })
 
-  it('redirects an authenticated user from "/" to the dashboard', async () => {
+  it('redirects an authenticated user from "/" to the dashboard, inside the app layout', async () => {
     renderAppRoutes('authenticated', ['/'])
 
     expect(await screen.findByText('Bem-vindo ao MarketPulse.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Dashboard/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Uploads/ })).toBeInTheDocument()
   })
 
   it('blocks direct access to /app without a session', async () => {
@@ -75,6 +61,17 @@ describe('AppRoutes', () => {
 
     expect(
       await screen.findByRole('heading', { name: 'Entrar no MarketPulse' }),
+    ).toBeInTheDocument()
+  })
+
+  it('navigates to a nested page via the sidebar', async () => {
+    const user = userEvent.setup()
+    renderAppRoutes('authenticated', ['/app'])
+
+    await user.click(await screen.findByRole('link', { name: /Uploads/ }))
+
+    expect(
+      await screen.findByText('Upload de arquivos ainda não está disponível'),
     ).toBeInTheDocument()
   })
 })
