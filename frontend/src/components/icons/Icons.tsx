@@ -142,6 +142,16 @@ export const EyeOffIcon = createIcon(
   />,
 )
 
+export const TrashIcon = createIcon(
+  <path
+    d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m3 0-.7 12.1a2 2 0 0 1-2 1.9H8.7a2 2 0 0 1-2-1.9L6 7h12ZM10 11v6m4-6v6"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />,
+)
+
 export const InboxIcon = createIcon(
   <path
     d="M4 12h4l2 3h4l2-3h4M4 12l1.5-6.3A2 2 0 0 1 7.44 4h9.12a2 2 0 0 1 1.94 1.7L20 12M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"

@@ -5,8 +5,8 @@
 | 0      | Foundation                          | ✅ Concluída |
 | 1      | Authentication                      | ✅ Concluída |
 | 2      | Design System & Frontend Foundation | ✅ Concluída |
-| 3      | File Import                         | ⏳ Próxima   |
-| 4      | ETL Engine                          | ⬜ Planejada |
+| 3      | File Import                         | ✅ Concluída |
+| 4      | ETL Engine                          | ⏳ Próxima   |
 | 5      | Analytics Dashboard                 | ⬜ Planejada |
 | 6      | Business Insights                   | ⬜ Planejada |
 | 7      | Release Candidate                   | ⬜ Planejada |
@@ -128,22 +128,58 @@ todos os cards e páginas de negócio permanecem placeholders.
 
 ---
 
-## Sprint 3 — File Import ⏳
+## Sprint 3 — File Import ✅
 
-**Objetivo:** upload de arquivos CSV e Excel.
+**Objetivo:** infraestrutura de upload e gestão de arquivos, preparando uma
+base sólida para o motor ETL da Sprint 4 — **sem** nenhum processamento,
+parsing, leitura de planilha ou análise nesta sprint.
 
-**Escopo previsto:**
+**Entregue:**
 
-- Endpoint de upload com validação de formato e tamanho.
-- Armazenamento dos arquivos e registro de importações.
-- Detecção automática do marketplace de origem.
-- Componente `FileUpload` com feedback de progresso (Design System).
-- A `UploadsPage` (hoje um `EmptyState`) passa a ter o fluxo real.
-- Endpoint `GET /ready` (readiness), verificando conexão com o banco (ADR-002).
+- Model `Upload` (`id`, `user_id`, `original_filename`, `stored_filename`,
+  `file_size`, `mime_type`, `status`, `error_message`, `uploaded_at`,
+  `updated_at`) + relação `User.uploads`, com migration própria validada
+  `upgrade`/`downgrade`/`upgrade` contra PostgreSQL real.
+- `UploadStatus` (`uploaded`/`queued`/`processing`/`processed`/`failed`) — só
+  `uploaded` é usado nesta sprint; os demais existem para a Sprint 4
+  transicionar.
+- Abstração `FileStorage` (`save`/`open`/`delete`) com implementação
+  `LocalFileStorage`, organizando os arquivos em
+  `storage/uploads/{user_id}/{stored_filename}` — local nesta sprint, sem
+  S3/nuvem (ver [decisions.md](decisions.md)), mas desenhada para a Sprint 4
+  consumir via `open()` sem refatoração.
+- `UploadService` com validação de extensão (`.csv`/`.xlsx`), Content-Type e
+  tamanho máximo configurável (`MAX_UPLOAD_SIZE_BYTES`), leitura em chunks
+  para não estourar memória, e `stored_filename` opaco (UUID) por segurança.
+- Endpoints `POST/GET/GET-{id}/DELETE /api/v1/uploads`, todos autenticados —
+  contrato completo em [api.md](api.md). Detalhe e exclusão de upload de
+  outro usuário respondem `404` (nunca `403` — mesmo padrão de
+  [ADR-018](decisions.md#adr-018--refresh-token-opaco-e-revogável-em-vez-de-jwt-stateless)).
+- Frontend: componentes `FileUpload` (drag & drop + seleção manual) e `Table`
+  genérica (ordenação, `aria-sort`) — novos membros do Design System, sem
+  bibliotecas de UI prontas (mesma decisão da Sprint 2).
+- `UploadsPage` real (fila com progresso simulado, busca por nome, ordenação
+  por data, exclusão com confirmação em `Dialog`, `EmptyState`/`Skeleton`/
+  `Toast`) substituindo o placeholder da Sprint 2; `UploadDetailPage` nova em
+  `/app/uploads/:id`.
+- Primeiro uso real de React Query no projeto (`useUploads.ts`): cache,
+  invalidação após criar/excluir.
+- 77 testes de backend (era 57 na Sprint 1) e 131 de frontend (era 105 na
+  Sprint 2), cobrindo upload válido/inválido, limite de tamanho, autenticação,
+  listagem, detalhe, exclusão, drag & drop, busca e ordenação.
+- Correções encontradas na revisão técnica: valores do enum de status
+  gravados em minúsculas (não os nomes do Python), precisão de timestamp no
+  SQLite, `<input>` fora do `<button>` (HTML inválido), `aria-sort` movido
+  para o `<th>`, mensagens de erro de upload distintas entre toast e item da
+  fila, e permissão de escrita em `/app/storage` no Dockerfile de produção.
+
+**Fora de escopo (por decisão, fica para a Sprint 4):** parsing de CSV/XLSX,
+leitura de conteúdo dos arquivos, detecção de marketplace de origem,
+dashboards, analytics, insights.
 
 ---
 
-## Sprint 4 — ETL Engine ⬜
+## Sprint 4 — ETL Engine ⏳
 
 **Objetivo:** implementar o processamento dos dados.
 

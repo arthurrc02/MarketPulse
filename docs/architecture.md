@@ -167,6 +167,63 @@ GET  /users/me       → protegido por get_current_user
 
 ---
 
+## Upload de Arquivos (Backend)
+
+Implementado na Sprint 3. Endpoints e contratos completos em
+[api.md](api.md#uploads); aqui, apenas o desenho. **Nenhum processamento
+acontece nesta camada** — os arquivos só são validados e armazenados.
+
+```text
+POST   /uploads       → valida, gera stored_filename, grava e registra
+GET    /uploads       → lista os uploads do usuário (mais recente primeiro)
+GET    /uploads/{id}  → metadados de um upload do usuário
+DELETE /uploads/{id}  → remove o arquivo em disco e o registro
+```
+
+| Peça                | Arquivo                        | Papel                                                          |
+| -------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `Upload`              | `app/models/upload.py`           | Entidade persistida; `status` cobre todo o ciclo de vida (ver abaixo). |
+| `UploadService`       | `app/services/upload.py`         | Validação (extensão/MIME/tamanho), geração do `stored_filename`, orquestração storage+DB. |
+| `UploadRepository`    | `app/repositories/upload.py`     | Acesso a dados, sem lógica de negócio.                              |
+| `FileStorage` / `LocalFileStorage` | `app/storage/`      | Abstração de armazenamento — ver "Armazenamento de Arquivos" abaixo. |
+
+**Modelo de dados:** `id`, `user_id` (FK, `ondelete="CASCADE"`),
+`original_filename` (só exibição — nunca usado para montar caminho),
+`stored_filename` (`uuid4().hex` + extensão validada; opaco, evita colisão e
+*path traversal*), `file_size`, `mime_type`, `status`, `error_message`
+(nullable — preparado para a Sprint 4 relatar falhas de processamento),
+`uploaded_at`, `updated_at`.
+
+**`status` — `UploadStatus`:** `uploaded` (único valor emitido nesta sprint) →
+`queued` → `processing` → `processed` | `failed`. Os quatro últimos existem
+só para o motor ETL da Sprint 4 transicionar — ver ADR correspondente em
+decisions.md sobre por que o enum já nasce completo.
+
+---
+
+## Armazenamento de Arquivos
+
+Local, organizado por usuário — sem S3/nuvem (ver ADR em decisions.md):
+
+```text
+storage/
+└── uploads/
+    └── {user_id}/
+        └── {uuid4().hex}.{csv|xlsx}
+```
+
+`app/storage/base.py` define `FileStorage` (ABC): `save`, `open`, `delete`.
+`LocalFileStorage` é a única implementação. `open()` não é usado nesta
+sprint — existe para o motor ETL da Sprint 4 ler os uploads já existentes
+sem precisar de uma interface nova (ver a observação do enunciado da Sprint 3
+sobre preparar a base para a Sprint 4 sem refatoração).
+
+Em Docker, `storage/` é um **bind mount** (`./storage:/app/storage`), não um
+volume nomeado — os arquivos ficam inspecionáveis diretamente no host, tanto
+em desenvolvimento quanto para depurar o que o motor ETL vai consumir.
+
+---
+
 ## Arquitetura do Frontend
 
 ```text
@@ -197,8 +254,8 @@ Os componentes deverão ser reutilizáveis sempre que possível.
 | Components | `src/components/ui/`      | Design System: primitivos reutilizáveis (ver [design-system.md](design-system.md)). |
 | Components | `src/components/layout/`  | `AppLayout`, `Sidebar`, `Header`, `PageContainer`, `Section`, `AuthLayout`. |
 | Components | `src/components/icons/`   | Catálogo único de ícones SVG (`Icons.tsx`).                         |
-| Hooks      | `src/hooks/`              | `useAuth`, `useToast`. Consultas ao React Query chegam com o primeiro dado real (Sprint 3+). |
-| Lib        | `src/lib/`                | `apiClient`, `auth/api`, `auth/tokenStore`, QueryClient, `env`.     |
+| Hooks      | `src/hooks/`              | `useAuth`, `useToast`, `useUploads` (React Query — primeiro uso real, ver abaixo). |
+| Lib        | `src/lib/`                | `apiClient`, `auth/api`, `uploads/api`, `auth/tokenStore`, `format`, QueryClient, `env`. |
 | Styles     | `src/styles/`             | Tokens e camadas base do Tailwind (ver design-system.md).           |
 | Test       | `src/test/`               | Setup do Vitest e `renderWithProviders` (helper de testes).         |
 
@@ -255,19 +312,54 @@ Catálogo completo de componentes, tokens e convenções visuais em
 encaixam:
 
 ```text
-/app          (layout route: ProtectedRoute → AppLayout)
-├── index         → DashboardPage      (KPICards placeholder + EmptyState)
-├── uploads        → UploadsPage        (EmptyState — Sprint 3)
-├── analytics       → AnalyticsPage       (EmptyState — Sprint 5)
-├── insights        → InsightsPage        (EmptyState — Sprint 6)
-└── settings        → SettingsPage        (Tabs: Perfil/Preferências/Segurança)
+/app              (layout route: ProtectedRoute → AppLayout)
+├── index             → DashboardPage      (KPICards placeholder + EmptyState)
+├── uploads            → UploadsPage        (fluxo completo — Sprint 3)
+├── uploads/:id         → UploadDetailPage   (metadados — Sprint 3)
+├── analytics           → AnalyticsPage       (EmptyState — Sprint 5)
+├── insights             → InsightsPage        (EmptyState — Sprint 6)
+└── settings              → SettingsPage        (Tabs: Perfil/Preferências/Segurança)
 ```
 
 `AppLayout` renderiza `Sidebar` + `Header` + `<Outlet />`; cada página nova
 sob `/app` só precisa de uma rota filha — não repete layout, sidebar ou
 header. `ToastProvider` envolve toda a árvore (acima do `BrowserRouter`, para
-sobreviver a navegações) e é usado hoje em login, cadastro e logout
-bem-sucedidos.
+sobreviver a navegações) e é usado hoje em login, cadastro, logout e upload
+(sucesso/erro).
+
+---
+
+## Upload de Arquivos (Frontend)
+
+Primeiro uso real do React Query configurado desde a Sprint 0 — `useUploads.ts`
+substitui o padrão manual `useState`/`useEffect` por `useQuery`/`useMutation`,
+com invalidação automática da lista após criar/excluir.
+
+```text
+UploadsPage
+   ├── FileUpload (drag & drop + clique)     → onFilesSelected
+   ├── progresso simulado (0→90% via setInterval; 100% na resposta real)
+   ├── useCreateUploadMutation                → POST /uploads (multipart)
+   ├── busca (SearchInput) + ordenação (Table) → client-side, sobre a lista já carregada
+   └── Table + UploadStatusBadge + Dialog de exclusão
+        │
+        ▼ (clique na linha)
+UploadDetailPage  →  useUploadQuery(id)  →  GET /uploads/{id}
+```
+
+| Peça                        | Arquivo                                    | Papel                                                          |
+| ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------ |
+| `uploads/api`                | `src/lib/uploads/api.ts`                       | Chamadas HTTP tipadas; `createUpload` monta o `FormData`.           |
+| `useUploads`                  | `src/hooks/useUploads.ts`                      | `useUploadsQuery`, `useUploadQuery`, `useCreateUploadMutation`, `useDeleteUploadMutation`. |
+| `FileUpload`                  | `src/components/ui/FileUpload.tsx`             | Dropzone (Design System) — cumpre a lacuna deixada em aberto na Sprint 2. |
+| `Table`                       | `src/components/ui/Table.tsx`                  | Tabela genérica (Design System), sem estado próprio de ordenação.   |
+| `UploadStatusBadge`           | `src/components/uploads/`                      | Composição de `Badge` específica do domínio — não é um primitivo do Design System. |
+| `apiClient`                   | `src/lib/apiClient.ts`                         | Estendido para aceitar `FormData` sem forçar `Content-Type` (o navegador define o boundary multipart). |
+
+`apiClient.ts` (Sprint 1) precisou de um ajuste: `buildRequestInit` agora
+detecta `body instanceof FormData` e pula tanto o `JSON.stringify` quanto o
+header `Content-Type` explícito — necessário para upload de arquivo, e
+retrocompatível com todas as chamadas JSON existentes.
 
 ---
 
@@ -300,7 +392,9 @@ infraestrutura de persistência.
 ## Banco de Dados
 
 - Cada usuário possuirá seu próprio workspace.
-- Todas as entidades principais serão vinculadas ao usuário autenticado.
+- Todas as entidades principais serão vinculadas ao usuário autenticado —
+  `Upload` é a primeira entidade de negócio a seguir esse padrão
+  (`user_id` com `ondelete="CASCADE"`, mesmo relacionamento de `RefreshToken`).
 - As migrations serão gerenciadas pelo Alembic.
 - A `Base` declarativa (`app/db/base.py`) define uma convenção de nomes
   explícita para índices e constraints, garantindo migrations reversíveis
@@ -330,7 +424,11 @@ Um Dockerfile por serviço, multi-stage, com dois alvos:
 | `development` | Docker Compose     | Hot reload, dependências de desenvolvimento.       |
 | `production`  | CI / deploy        | Backend sem privilégios; frontend servido por Nginx. |
 
-Ambos usam a **raiz do repositório** como contexto de build (ADR-014).
+Ambos usam a **raiz do repositório** como contexto de build (ADR-014). No
+alvo `production`, `/app/storage` é a única exceção ao "sem privilégios sobre
+o próprio código": pertence ao usuário da aplicação, porque os uploads
+(Sprint 3) são gravados ali em runtime — sem isso, `UploadService` falharia
+com `PermissionError` (achado durante a validação Docker desta sprint).
 
 ### Integração Contínua
 

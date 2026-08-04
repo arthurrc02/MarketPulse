@@ -60,7 +60,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # O processo roda sem privilégios e sem posse do código: `/app` e `/opt/venv`
 # seguem pertencendo ao root com permissão de leitura/execução para todos, de
 # modo que a aplicação não consiga alterar os próprios arquivos em runtime.
-RUN useradd --create-home --uid 1000 marketpulse
+#
+# `/app/storage` é a única exceção: os uploads (Sprint 3) são gravados ali em
+# runtime, então precisa pertencer ao usuário da aplicação — sem isso,
+# `UploadService` falharia com `PermissionError` ao tentar criar o diretório
+# do usuário dentro de `storage/uploads/`.
+RUN useradd --create-home --uid 1000 marketpulse \
+    && chown -R marketpulse:marketpulse /app/storage
 
 USER marketpulse
 WORKDIR /app/backend

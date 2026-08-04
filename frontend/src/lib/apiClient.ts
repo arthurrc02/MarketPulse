@@ -77,15 +77,30 @@ async function extractErrorMessage(response: Response): Promise<string> {
 }
 
 function buildRequestInit(options: RequestOptions): RequestInit {
-  const headers = new Headers({ 'Content-Type': 'application/json' })
+  const isFormData = options.body instanceof FormData
+  const headers = new Headers()
+  // `FormData` nunca leva `Content-Type` explícito: o navegador define o
+  // header sozinho, incluindo o `boundary` multipart — setá-lo à mão quebra
+  // o parsing do multipart no servidor.
+  if (!isFormData) {
+    headers.set('Content-Type', 'application/json')
+  }
   if (options.authenticated) {
     const token = getAccessToken()
     if (token) headers.set('Authorization', `Bearer ${token}`)
   }
+
+  let body: BodyInit | null = null
+  if (isFormData) {
+    body = options.body as FormData
+  } else if (options.body !== undefined) {
+    body = JSON.stringify(options.body)
+  }
+
   return {
     method: options.method ?? 'GET',
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : null,
+    body,
   }
 }
 

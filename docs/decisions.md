@@ -50,7 +50,8 @@ tocar no banco. Retorna `status`, `service`, `version` e `environment`.
 
 **Consequências.** O healthcheck do Docker é confiável e a CI não precisa de um
 PostgreSQL para testar o endpoint. Quando houver dependências que justifiquem,
-um `GET /ready` separado será adicionado (Sprint 3 ou posterior).
+um `GET /ready` separado será adicionado quando houver uma dependência real
+a checar (ver [roadmap.md](roadmap.md) — não fez parte do escopo da Sprint 3).
 
 ---
 
@@ -778,3 +779,276 @@ páginas viram rotas filhas (`index`, `uploads`, `analytics`, `insights`,
 acrescentar uma rota filha — nenhum arquivo de layout muda. `AppLayout`
 também centraliza o estado da gaveta mobile da Sidebar (fecha sozinha a cada
 navegação), que seria estranho de replicar por página.
+
+---
+
+## ADR-034 — Armazenamento local em disco, sem S3/nuvem nesta sprint
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** `architecture.md` prevê armazenamento de arquivos, mas a Sprint
+3 tem escopo explicitamente restrito a "guardar o arquivo" — sem
+processamento. Um provedor de object storage (S3, R2, GCS) resolveria
+durabilidade e escala, mas exige credenciais, um SDK e infraestrutura extra
+que ainda não existem no projeto.
+
+**Decisão.** Os arquivos são gravados em disco local, organizados por
+usuário em `storage/uploads/{user_id}/{stored_filename}`, montados no
+contêiner via bind mount do Docker Compose (`./storage:/app/storage`) — não
+um volume nomeado, para que o conteúdo seja inspecionável diretamente do
+host durante o desenvolvimento.
+
+**Alternativas descartadas.**
+
+- _S3 (ou compatível) desde já_: adiciona uma dependência de infraestrutura
+  externa (conta, bucket, credenciais) a uma sprint que só precisa provar
+  que "salvar e listar arquivos" funciona — desproporcional ao escopo atual.
+
+**Consequências.** Nenhum arquivo enviado sobrevive a um ambiente sem disco
+persistente (ex.: um PaaS com filesystem efêmero) — aceitável para
+desenvolvimento e para a fase atual do projeto, mas listado como melhoria
+futura para quando houver deploy real. A migração para object storage é
+isolada pela abstração `FileStorage` (ver [ADR-035](#adr-035--abstração-filestorage-isolando-o-mecanismo-de-persistência)) — trocar a implementação não exige tocar em
+`UploadService` nem nos routers.
+
+---
+
+## ADR-035 — Abstração `FileStorage` isolando o mecanismo de persistência
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** A Sprint 3 pediu explicitamente para preparar o terreno da
+Sprint 4: o motor ETL vai precisar *ler* o conteúdo dos arquivos já
+enviados, sem que a Sprint 3 tenha implementado nenhum parsing. Se
+`UploadService` chamasse `Path.write_bytes()`/`open()` diretamente, o ETL
+(ou uma futura migração para S3) exigiria reescrever a camada de serviço.
+
+**Decisão.** `app/storage/base.py` define `FileStorage`, uma classe
+abstrata com três métodos: `save`, `open` (retorna um `BinaryIO`, não usado
+nesta sprint — existe para a Sprint 4) e `delete` (idempotente).
+`LocalFileStorage` é a única implementação por ora; `UploadService` recebe a
+instância via injeção de dependência (`get_upload_service` em
+`app/api/deps.py`), sem conhecer o caminho em disco.
+
+**Consequências.** A Sprint 4 pode chamar `storage.open(user_id=...,
+stored_filename=...)` para ler o conteúdo de um upload existente sem
+nenhuma mudança em `UploadService`, no model `Upload` ou nos endpoints. Uma
+futura migração para S3 é uma nova classe `S3FileStorage` mais uma troca na
+factory de `deps.py` — nenhum outro arquivo muda.
+
+---
+
+## ADR-036 — `stored_filename` opaco (UUID) em vez do nome original
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** Gravar o arquivo com o `original_filename` enviado pelo
+usuário parece natural, mas expõe dois problemas: colisão de nomes entre
+uploads diferentes do mesmo usuário, e path traversal se o nome não for
+sanitizado com cuidado (`../../etc/passwd`, caracteres de controle, etc.).
+
+**Decisão.** `UploadService.create_upload` gera
+`stored_filename = f"{uuid.uuid4().hex}{extension}"` — só a extensão
+validada do arquivo original é preservada. `original_filename` continua
+guardado no banco (e devolvido pela API) só para exibição; nunca é usado
+para compor um caminho em disco.
+
+**Consequências.** Path traversal via nome de arquivo é estruturalmente
+impossível — o nome gravado nunca deriva de entrada do usuário além da
+extensão (já validada contra uma lista fechada). O schema `UploadRead`
+deliberadamente omite `stored_filename` da resposta da API — é um detalhe
+de implementação, não um contrato com o cliente.
+
+---
+
+## ADR-037 — `values_callable` para gravar os valores do enum, não os nomes do Python
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** O comportamento padrão do `sa.Enum()` do SQLAlchemy grava o
+**nome** do membro Python (`"UPLOADED"`) na coluna, não o `.value`
+(`"uploaded"`). A API serializa `UploadStatus` via Pydantic usando `.value`
+(minúsculo, por ser um `StrEnum`) — sem correção, o valor gravado no banco
+divergiria do valor devolvido pela API, e uma futura query SQL bruta do ETL
+(Sprint 4) contra a coluna `status` encontraria `"UPLOADED"`, não
+`"uploaded"`.
+
+**Decisão.** A coluna `status` do model `Upload` declara
+`values_callable=lambda enum_cls: [member.value for member in enum_cls]`,
+forçando o SQLAlchemy a gravar `.value` em vez do nome do membro. A
+migration autogerada inicialmente (`c619d3650ce0`, com valores maiúsculos)
+foi descartada e regenerada (`420e360b0aa9`) já com os valores corretos.
+
+**Consequências.** Banco e API concordam sobre o formato do status,
+verificado por teste de integração e por inspeção manual do
+`CHECK CONSTRAINT` gerado. Esse é exatamente o tipo de divergência que só
+aparece ao ler a migration autogerada com atenção — vale conferir sempre
+que um novo `Enum` for adicionado a um model.
+
+---
+
+## ADR-038 — `native_enum=False` no enum de status do upload
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** Por padrão, `sa.Enum()` cria um tipo `ENUM` nativo do
+PostgreSQL. Adicionar um valor novo a um enum nativo do Postgres exige
+`ALTER TYPE ... ADD VALUE` — uma operação com restrições (não pode rodar
+dentro de uma transação junto de outros comandos em versões mais antigas do
+Postgres) e mais cerimônia do que uma migration comum. A Sprint 4 vai
+precisar transicionar `status` por `queued`/`processing`/`processed`/
+`failed` — os valores já existem hoje, mas é razoável esperar refinamentos
+(ex.: um status `partially_processed`) conforme o ETL amadurece.
+
+**Decisão.** `native_enum=False` grava a coluna como `VARCHAR(20)` com um
+`CHECK CONSTRAINT` listando os valores válidos, em vez de um tipo `ENUM`
+nativo.
+
+**Consequências.** Adicionar um valor novo no futuro é uma migration comum
+(`ALTER TABLE ... DROP CONSTRAINT ... ADD CONSTRAINT ...`), sem as
+restrições do `ALTER TYPE` nativo. O custo é um `CHECK CONSTRAINT` levemente
+menos eficiente que um tipo nativo — irrelevante no volume de dados desta
+fase do projeto.
+
+---
+
+## ADR-039 — Leitura em chunks para validar o tamanho do upload
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** Validar `MAX_UPLOAD_SIZE_BYTES` exige saber o tamanho do
+arquivo. Chamar `file.read()` inteiro antes de checar o tamanho carregaria
+um arquivo arbitrariamente grande inteiro em memória antes de rejeitá-lo —
+exatamente o cenário que a validação deveria prevenir.
+
+**Decisão.** `_read_within_limit` (em `app/services/upload.py`) lê o
+`UploadFile` em blocos de 1 MiB, somando o total lido; assim que o total
+excede `max_upload_size_bytes`, a leitura para e `FileTooLargeError` é
+levantada — sem nunca materializar mais que ~1 MiB acima do limite
+configurado em memória de uma vez.
+
+**Consequências.** Um upload de 500 MB com limite de 10 MiB nunca chega a
+alocar 500 MB de memória — o teste de limite de tamanho
+(`test_upload_rejects_file_above_size_limit`) usa um limite artificialmente
+baixo (10 bytes) via `dependency_overrides` para exercitar esse caminho sem
+precisar gerar um arquivo grande de verdade.
+
+---
+
+## ADR-040 — `chown` restrito a `/app/storage` no Dockerfile de produção
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** A Sprint 0 ([ADR-014](#adr-014--dockerfiles-multi-stage-com-alvos-development-e-production)) deixou `/app` pertencendo a `root` no
+estágio de produção, deliberadamente, para que o processo não pudesse
+alterar o próprio código em runtime. A Sprint 3 introduziu escrita real em
+disco (`storage/uploads/`) — descoberto durante a validação manual do
+Docker (não por um teste automatizado): rodar a imagem de produção e tentar
+um upload real falhava com `PermissionError`, porque o usuário `marketpulse`
+(uid 1000) não tinha permissão de escrita em nenhum subdiretório de `/app`.
+
+**Decisão.** Adicionar `chown -R marketpulse:marketpulse /app/storage`
+**depois** do `useradd`, mantendo o restante de `/app` como estava
+(propriedade de `root`, leitura/execução para todos).
+
+**Consequências.** Upload funciona em produção sem reabrir a decisão da
+Sprint 0 para o resto do código-fonte — só o diretório que realmente precisa
+de escrita em runtime muda de dono. Validado com um upload real via `curl`
+contra um contêiner standalone no alvo `production` (não só o `development`
+do Compose, que roda como root e mascararia o problema).
+
+---
+
+## ADR-041 — Toast e erro inline com textos distintos no upload
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** A primeira versão do tratamento de erro em `UploadsPage`
+usava a mesma string (`error.message`, vinda da API) tanto no `Toast`
+quanto no item da fila de upload — uma redundância visual (a mesma frase
+aparecendo duas vezes na tela) descoberta ao escrever o teste de erro:
+`findByText` passou a encontrar dois elementos com o mesmo texto.
+
+**Decisão.** O `Toast` mostra uma mensagem curta e genérica
+(`Falha ao enviar ${nome}.`); o item da fila mostra o motivo específico
+vindo da API (`error.message`, ex.: "Tipo de arquivo não suportado").
+
+**Consequências.** Nenhuma duplicação visual, e cada mensagem cumpre um
+papel diferente: o toast avisa que algo falhou (efêmero, pode ser
+dispensado sem ler), o item da fila explica o motivo (permanece na tela até
+o usuário remover ou tentar de novo).
+
+---
+
+## ADR-042 — `<input type="file">` como irmão do `<button>`, não filho
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** A primeira versão de `FileUpload` colocava o `<input
+type="file">` **dentro** do `<button>` clicável, escondido via `sr-only`. A
+spec do HTML proíbe conteúdo interativo (como `<input>`) como filho de
+`<button>` — um erro de HTML inválido pego na revisão de acessibilidade
+pedida explicitamente pelo prompt da sprint, não por um teste automatizado
+(jsdom não valida aninhamento de HTML).
+
+**Decisão.** `<button>` e `<input>` viram irmãos dentro de um `<div
+className="relative">`. O `<input>` recebe `tabIndex={-1}` e
+`aria-hidden="true"` — só o `<button>` é alcançável por teclado/leitor de
+tela; o clique nele dispara `inputRef.current?.click()` programaticamente.
+
+**Consequências.** HTML válido, um único elemento focável por teclado
+(evita foco duplo ao tabular pela área de upload), suíte completa
+(131 testes de frontend) re-executada após a correção sem regressão.
+
+---
+
+## ADR-043 — `apiClient` detecta `FormData` para omitir o `Content-Type`
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** `buildRequestInit` (em `lib/apiClient.ts`) sempre definia
+`Content-Type: application/json` e serializava o corpo com
+`JSON.stringify`. Um upload de arquivo precisa de
+`multipart/form-data`, cujo `boundary` só o próprio navegador consegue
+gerar corretamente — definir o header manualmente (mesmo com o valor
+"certo") quebra o parsing do multipart no servidor.
+
+**Decisão.** `buildRequestInit` verifica `options.body instanceof
+FormData`: se for, **não** define `Content-Type` (o navegador define
+`multipart/form-data; boundary=...` sozinho) e passa o `FormData` como
+corpo sem `JSON.stringify`.
+
+**Consequências.** `createUpload` (em `lib/uploads/api.ts`) monta um
+`FormData` comum e chama `apiClient` normalmente, sem nenhum tratamento
+especial no call site — a distinção fica isolada dentro do próprio cliente
+HTTP, reutilizável por qualquer endpoint multipart futuro.
+
+---
+
+## ADR-044 — `FileUpload` e `Table` continuam o Design System sem bibliotecas prontas
+
+**Sprint:** 3 · **Status:** Aceita
+
+**Contexto.** A restrição da Sprint 2 ([ADR-027](#adr-027--design-system-com-componentes-próprios-sem-bibliotecas-de-ui)) era, em parte,
+temporária por escopo: uploads e tabelas de dados não existiam ainda. Uma
+área de drag & drop e uma tabela ordenável são exatamente o tipo de
+componente onde uma lib pronta (`react-dropzone`, `@tanstack/table`)
+economiza tempo real.
+
+**Decisão.** `FileUpload` e `Table` são implementados do zero, seguindo o
+mesmo princípio da Sprint 2 — Design System próprio, sem bibliotecas de UI
+ou de dados de terceiros.
+
+**Alternativas descartadas.**
+
+- _`react-dropzone`_: resolveria os handlers de drag & drop prontos, mas o
+  componente resultante teria pouco código próprio — a área de upload é,
+  visualmente, a peça central desta sprint.
+- _`@tanstack/table`_: poderoso para tabelas complexas (paginação virtual,
+  filtros compostos), mas a `UploadsPage` precisa só de ordenação por uma
+  coluna — desproporcional a uma dependência nova para esse requisito.
+
+**Consequências.** Mais duas peças auditáveis no Design System, testadas
+diretamente (`FileUpload.test.tsx`, `Table.test.tsx`), sem API de terceiros
+para aprender. `Table` é genérica (`Table<T>`) o bastante para ser
+reaproveitada em listagens futuras (Sprint 5+) sem reescrita.

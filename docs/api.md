@@ -1,6 +1,6 @@
 # MarketPulse — API Reference
 
-Referência dos endpoints disponíveis após a Sprint 1 (Authentication). A
+Referência dos endpoints disponíveis após a Sprint 3 (File Import). A
 documentação interativa (Swagger) fica em `/docs` fora do ambiente de
 produção — ver [ADR-003](decisions.md#adr-003--health-fora-do-prefixo-versionado-da-api).
 
@@ -173,6 +173,102 @@ Retorna os dados do usuário autenticado. Requer
 | ------ | -------------------------------------------------------------------- |
 | `401`  | Header ausente, token malformado, expirado, ou de tipo errado (ex.: um refresh token usado como access token). |
 | `403`  | A conta associada ao token foi desativada.                            |
+
+---
+
+## Uploads
+
+Todos os endpoints exigem `Authorization: Bearer <access_token>`. Nenhum
+processamento acontece nesta sprint — os arquivos só são armazenados (ver
+[roadmap.md](roadmap.md), Sprint 3).
+
+### `POST /api/v1/uploads`
+
+Envia um arquivo (`multipart/form-data`, campo `file`). Aceita apenas CSV e
+XLSX, validados por extensão **e** Content-Type; tamanho máximo configurável
+via `MAX_UPLOAD_SIZE_BYTES` (padrão 10 MiB).
+
+**Requisição:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/uploads \
+  -H "Authorization: Bearer <access_token>" \
+  -F "file=@relatorio.csv;type=text/csv"
+```
+
+**Resposta `201`:**
+
+```json
+{
+  "id": "1a165602-feb3-4001-8336-0fce06f8b59d",
+  "original_filename": "relatorio.csv",
+  "file_size": 31,
+  "mime_type": "text/csv",
+  "status": "uploaded",
+  "uploaded_at": "2026-07-31T01:33:54.163129Z"
+}
+```
+
+`status` é sempre `"uploaded"` nesta sprint — os demais valores
+(`queued`/`processing`/`processed`/`failed`) existem para o motor ETL da
+Sprint 4, que passa a transicioná-los.
+
+**Erros:**
+
+| Status | Situação                                                        |
+| ------ | ------------------------------------------------------------------ |
+| `401`  | Sem token de acesso válido.                                        |
+| `413`  | Arquivo maior que `MAX_UPLOAD_SIZE_BYTES`.                          |
+| `415`  | Extensão diferente de `.csv`/`.xlsx`, ou Content-Type incompatível. |
+| `422`  | Arquivo sem nome ou vazio.                                          |
+
+---
+
+### `GET /api/v1/uploads`
+
+Lista os uploads do usuário autenticado, do mais recente para o mais antigo.
+Sem paginação nesta sprint (ver decisions.md) — busca e ordenação por outros
+critérios acontecem no cliente.
+
+**Resposta `200`:**
+
+```json
+[
+  {
+    "id": "1a165602-feb3-4001-8336-0fce06f8b59d",
+    "original_filename": "relatorio.csv",
+    "file_size": 31,
+    "mime_type": "text/csv",
+    "status": "uploaded",
+    "uploaded_at": "2026-07-31T01:33:54.163129Z"
+  }
+]
+```
+
+---
+
+### `GET /api/v1/uploads/{id}`
+
+Detalhes de um upload do usuário autenticado. Mesmo formato de resposta do
+`POST /uploads`.
+
+**Erros:**
+
+| Status | Situação                                                    |
+| ------ | ---------------------------------------------------------------- |
+| `404`  | Upload inexistente **ou pertencente a outro usuário** (nunca `403` — não revela a quem o `id` pertence). |
+
+---
+
+### `DELETE /api/v1/uploads/{id}`
+
+Remove o arquivo em disco e o registro. **Resposta:** `204 No Content`.
+
+**Erros:**
+
+| Status | Situação                                                    |
+| ------ | ---------------------------------------------------------------- |
+| `404`  | Upload inexistente ou pertencente a outro usuário.                |
 
 ---
 

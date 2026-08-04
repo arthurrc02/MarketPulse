@@ -3,17 +3,9 @@ import { describe, expect, it } from 'vitest'
 
 import { AnalyticsPage } from '@/pages/AnalyticsPage'
 import { InsightsPage } from '@/pages/InsightsPage'
-import { UploadsPage } from '@/pages/UploadsPage'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 describe('Placeholder pages', () => {
-  it('UploadsPage points to Sprint 3', () => {
-    renderWithProviders(<UploadsPage />)
-
-    expect(screen.getByRole('heading', { name: 'Uploads' })).toBeInTheDocument()
-    expect(screen.getByText('Sprint 3')).toBeInTheDocument()
-  })
-
   it('AnalyticsPage points to Sprint 5', () => {
     renderWithProviders(<AnalyticsPage />)
 

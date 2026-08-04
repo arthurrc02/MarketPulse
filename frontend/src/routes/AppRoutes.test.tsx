@@ -65,13 +65,14 @@ describe('AppRoutes', () => {
   })
 
   it('navigates to a nested page via the sidebar', async () => {
+    // Configurações não depende de uma chamada de rede (ao contrário de
+    // Uploads, coberta em profundidade em `UploadsPage.test.tsx`), então
+    // este teste fica focado só na navegação em si.
     const user = userEvent.setup()
     renderAppRoutes('authenticated', ['/app'])
 
-    await user.click(await screen.findByRole('link', { name: /Uploads/ }))
+    await user.click(await screen.findByRole('link', { name: /Configurações/ }))
 
-    expect(
-      await screen.findByText('Upload de arquivos ainda não está disponível'),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: 'Perfil' })).toBeInTheDocument()
   })
 })

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, type RenderResult } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
@@ -21,7 +22,9 @@ interface RenderWithProvidersOptions {
 
 /**
  * Envolve `ui` com os providers reais que a árvore de rotas espera:
- * `MemoryRouter` (para `useNavigate`/`useLocation`/`NavLink`), `ToastProvider`
+ * `MemoryRouter` (para `useNavigate`/`useLocation`/`NavLink`), um
+ * `QueryClient` novo por teste (sem retry — uma falha simulada não deve
+ * ficar tentando de novo e estourar o timeout do teste), `ToastProvider`
  * (real — não há bootstrap assíncrono a mockar) e um `AuthContext.Provider`
  * com valor controlável por teste (mocka apenas a autenticação, que tem
  * efeitos colaterais reais de rede).
@@ -39,11 +42,17 @@ export function renderWithProviders(
     ...authValue,
   }
 
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+
   return render(
     <MemoryRouter initialEntries={initialEntries}>
-      <ToastProvider>
-        <AuthContext.Provider value={value}>{ui}</AuthContext.Provider>
-      </ToastProvider>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthContext.Provider value={value}>{ui}</AuthContext.Provider>
+        </ToastProvider>
+      </QueryClientProvider>
     </MemoryRouter>,
   )
 }

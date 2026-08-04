@@ -8,6 +8,7 @@ produção (ver ADR-019 em `docs/decisions.md`).
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -16,12 +17,16 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.deps import get_upload_service
+from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_session
 from app.main import create_app
 
 # Importa os models para que `Base.metadata` os conheça antes do `create_all`.
-from app.models import RefreshToken, User  # noqa: F401
+from app.models import RefreshToken, Upload, User  # noqa: F401
+from app.services.upload import UploadService
+from app.storage.local import LocalFileStorage
 
 
 @pytest.fixture
@@ -54,19 +59,34 @@ def db_session(engine: Engine) -> Iterator[Session]:
 
 
 @pytest.fixture
+def upload_storage_dir(tmp_path: Path) -> Path:
+    """Diretório de storage isolado por teste — nunca toca `storage/uploads` real."""
+    return tmp_path / "uploads"
+
+
+@pytest.fixture
 def app() -> FastAPI:
     """Instância da aplicação FastAPI usada nos testes."""
     return create_app()
 
 
 @pytest.fixture
-def client(app: FastAPI, db_session: Session) -> Iterator[TestClient]:
-    """Cliente HTTP de teste com `get_session` substituído pela sessão de teste."""
+def client(app: FastAPI, db_session: Session, upload_storage_dir: Path) -> Iterator[TestClient]:
+    """Cliente HTTP de teste com `get_session`/`get_upload_service` substituídos."""
 
     def _override_get_session() -> Iterator[Session]:
         yield db_session
 
+    def _override_get_upload_service() -> UploadService:
+        storage = LocalFileStorage(upload_storage_dir)
+        return UploadService(
+            session=db_session,
+            storage=storage,
+            max_upload_size_bytes=settings.MAX_UPLOAD_SIZE_BYTES,
+        )
+
     app.dependency_overrides[get_session] = _override_get_session
+    app.dependency_overrides[get_upload_service] = _override_get_upload_service
     try:
         with TestClient(app) as test_client:
             yield test_client

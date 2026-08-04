@@ -22,14 +22,15 @@ Guia para colocar o ambiente de desenvolvimento do MarketPulse no ar.
 MarketPulse/
 ├── backend/            # API FastAPI (arquitetura em camadas)
 │   ├── app/
-│   │   ├── api/        # Routers (health, auth, users) e dependências HTTP
+│   │   ├── api/        # Routers (health, auth, users, uploads) e dependências HTTP
 │   │   ├── core/       # Settings, logging, security (JWT/bcrypt), erros de domínio
 │   │   ├── db/         # Engine, sessão e base declarativa
-│   │   ├── models/     # User, RefreshToken
+│   │   ├── models/     # User, RefreshToken, Upload
 │   │   ├── repositories/
 │   │   ├── schemas/    # Contratos Pydantic
-│   │   └── services/   # AuthService e demais regras de negócio
-│   ├── migrations/     # Alembic (1 revisão: users + refresh_tokens)
+│   │   ├── services/   # AuthService, UploadService e demais regras de negócio
+│   │   └── storage/    # Abstração FileStorage + LocalFileStorage
+│   ├── migrations/     # Alembic (2 revisões: users+refresh_tokens, uploads)
 │   └── tests/
 ├── etl/                # Motor ETL (apenas contratos até aqui)
 │   ├── etl/
@@ -52,6 +53,8 @@ MarketPulse/
 │       └── test/       # Setup do Vitest + renderWithProviders
 ├── docker/             # Dockerfiles e configuração do Nginx
 ├── docs/               # Documentação do projeto
+├── storage/            # Arquivos enviados via upload (bind mount, fora do Git)
+│   └── uploads/         # {user_id}/{stored_filename} — ver architecture.md
 ├── .github/workflows/  # Pipelines de CI
 ├── docker-compose.yml
 └── pyproject.toml      # Workspace uv (backend + etl)
@@ -79,6 +82,8 @@ cp .env.example .env
 | `JWT_ALGORITHM`                     | `HS256`                 | Algoritmo de assinatura do JWT.            |
 | `ACCESS_TOKEN_EXPIRE_MINUTES`       | `15`                    | Validade do access token.                  |
 | `REFRESH_TOKEN_EXPIRE_DAYS`         | `7`                     | Validade do refresh token.                 |
+| `UPLOAD_STORAGE_DIR`                | `storage/uploads`       | Diretório onde os arquivos enviados são gravados (local, fora do Git). |
+| `MAX_UPLOAD_SIZE_BYTES`             | `10485760` (10 MiB)     | Tamanho máximo aceito por upload.          |
 | `VITE_API_URL`                      | `http://localhost:8000` | URL da API consumida pelo frontend.       |
 
 > Em `production`, a documentação interativa (`/docs`, `/redoc`, `/openapi.json`) é desabilitada automaticamente.
@@ -188,7 +193,8 @@ uv run alembic current
 ```
 
 > A primeira revisão (`867258180ae6`) cria as tabelas `users` e
-> `refresh_tokens`, geradas por autogenerate na Sprint 1.
+> `refresh_tokens`, geradas por autogenerate na Sprint 1. A segunda
+> (`420e360b0aa9`) cria a tabela `uploads` na Sprint 3.
 
 ---
 
@@ -221,11 +227,24 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
   -d '{"email": "test@example.com", "password": "Sup3rSecret!"}'
 ```
 
+Com o `access_token` retornado, um upload real pode ser testado via `curl`
+(contrato completo em [api.md](api.md)):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/uploads \
+  -H "Authorization: Bearer <access_token>" \
+  -F "file=@relatorio.csv;type=text/csv"
+```
+
+O arquivo aparece em `storage/uploads/{user_id}/` na raiz do repositório
+(bind mount do Compose — ver [architecture.md](architecture.md)).
+
 O frontend em http://localhost:5173 deve exibir a tela de login; após
 cadastro/login, o dashboard real (sidebar, header e cards de exemplo) com
-"Bem-vindo ao MarketPulse." — navegue por Uploads, Analytics, Insights e
-Configurações pela barra lateral para ver os placeholders de cada
-funcionalidade futura.
+"Bem-vindo ao MarketPulse." — a página de Uploads já tem o fluxo real
+(drag & drop, histórico, exclusão); navegue por Analytics, Insights e
+Configurações pela barra lateral para ver os placeholders das próximas
+sprints.
 
 ---
 
@@ -250,6 +269,16 @@ cd frontend && npm run lint && npm run format:check && npm run typecheck && npm 
 ---
 
 ## Solução de problemas
+
+**Cadastro/login falha com erro 500 (`relation "users" does not exist`)**
+As tabelas de autenticação não existem no banco ainda — a migration não roda
+sozinha. Isso acontece sempre que o volume do Postgres é criado do zero
+(primeiro `docker compose up`, ou depois de um `docker compose down -v`).
+Aplique a migration uma vez:
+
+```bash
+docker compose exec backend alembic upgrade head
+```
 
 **`uv sync` falha ao encontrar o Python 3.12**
 O `uv` baixa a versão automaticamente; se estiver offline, instale o Python 3.12
@@ -286,3 +315,25 @@ Comportamento esperado sem acesso à internet — `index.html` carrega a Inter
 via Google Fonts com `font-display: swap`; sem rede, o CSS já cai para
 `ui-sans-serif`/`system-ui` (ver [ADR-028](decisions.md#adr-028--inter-via-google-fonts-com-fallback-progressivo)).
 Não é um erro a corrigir.
+
+**Upload falha com `PermissionError` ao gravar em `storage/uploads/`**
+No alvo `production` do Dockerfile o processo roda como usuário sem
+privilégios (`marketpulse`, uid 1000); o diretório `/app/storage` precisa
+pertencer a esse usuário, não ao `root` (ver
+[ADR-034](decisions.md#adr-034--chown-de-appstorage-no-dockerfile-de-produção)).
+Rode `docker compose build backend` novamente após alterações no Dockerfile —
+imagens antigas não têm a correção retroativamente. Fora do Docker, confirme
+que o processo local tem permissão de escrita no diretório apontado por
+`UPLOAD_STORAGE_DIR`.
+
+**Upload retorna `415 Unsupported Media Type` para um CSV/XLSX válido**
+O navegador ou sistema operacional enviou um `Content-Type` fora da lista
+permitida (ex.: `application/octet-stream` para um `.xlsx` sem associação de
+tipo no SO). Confirme a extensão do arquivo (`.csv`/`.xlsx`, maiúscula ou
+minúscula) e, ao testar via `curl`, informe o tipo explicitamente com
+`-F "file=@arquivo.csv;type=text/csv"`.
+
+**Upload retorna `413` para um arquivo abaixo do limite esperado**
+Confirme o valor de `MAX_UPLOAD_SIZE_BYTES` no `.env` — o padrão é 10 MiB
+(`10485760`). Após alterar, recrie o backend
+(`docker compose up -d --force-recreate backend`).

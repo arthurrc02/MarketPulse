@@ -46,3 +46,42 @@ class UserInactiveError(AppError):
 
     status_code = status.HTTP_403_FORBIDDEN
     detail = "Esta conta está desativada."
+
+
+class InvalidUploadError(AppError):
+    """O arquivo enviado é inválido (sem nome, vazio etc.)."""
+
+    # `HTTP_422_UNPROCESSABLE_ENTITY` é o nome antigo (RFC 4918/WebDAV) e está
+    # depreciado no Starlette em favor de `HTTP_422_UNPROCESSABLE_CONTENT`
+    # (RFC 9110) — mesmo caso do 413 em `FileTooLargeError` abaixo.
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    detail = "Arquivo inválido."
+
+
+class UnsupportedFileTypeError(AppError):
+    """A extensão ou o Content-Type do arquivo não é CSV nem XLSX."""
+
+    status_code = status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+    detail = "Tipo de arquivo não suportado. Envie um arquivo CSV ou XLSX."
+
+
+class FileTooLargeError(AppError):
+    """O arquivo excede `settings.MAX_UPLOAD_SIZE_BYTES`."""
+
+    # `HTTP_413_REQUEST_ENTITY_TOO_LARGE` é o nome antigo (RFC 7231) e está
+    # depreciado no Starlette em favor de `HTTP_413_CONTENT_TOO_LARGE` (RFC
+    # 9110) — usar o antigo emitiria um warning, tratado como erro pela suíte
+    # de testes (`filterwarnings = ["error"]`).
+    status_code = status.HTTP_413_CONTENT_TOO_LARGE
+    detail = "Arquivo excede o tamanho máximo permitido."
+
+
+class UploadNotFoundError(AppError):
+    """Upload inexistente ou pertencente a outro usuário.
+
+    Sempre 404 — nunca 403 — para não revelar a um usuário que um `id` de
+    upload existe e pertence a outra pessoa.
+    """
+
+    status_code = status.HTTP_404_NOT_FOUND
+    detail = "Upload não encontrado."

@@ -9,12 +9,12 @@ negócio. O MarketPulse importa arquivos CSV e Excel de **Shopee, Mercado Livre,
 Amazon e Magalu**, padroniza tudo em um único modelo de dados e apresenta
 indicadores, gráficos e insights automáticos em um dashboard moderno.
 
-> **Status:** Sprint 2 (Design System & Frontend Foundation) concluída. Além
-> da autenticação completa (Sprint 1), o produto agora tem identidade visual
-> própria: Design System com 18 componentes, dashboard real (sidebar, header,
-> cards de exemplo) e navegação preparada para Uploads, Analytics, Insights e
-> Configurações. Nenhuma funcionalidade de negócio (marketplaces, upload,
-> ETL, dados reais) existe ainda — começam na Sprint 3 em diante.
+> **Status:** Sprint 3 (File Import) concluída. Usuários autenticados já
+> conseguem enviar arquivos CSV/XLSX (drag & drop ou seleção manual),
+> acompanhar o histórico de uploads, ver detalhes e excluir arquivos — tudo
+> armazenado localmente, organizado por usuário. Nenhum processamento do
+> conteúdo dos arquivos (parsing, detecção de marketplace, dashboards,
+> insights) existe ainda — começam na Sprint 4 em diante.
 
 ---
 
@@ -44,8 +44,8 @@ docker compose up --build
 | Health     | http://localhost:8000/health |
 | Swagger UI | http://localhost:8000/docs   |
 
-Depois de subir os contêineres, aplique a migration para criar as tabelas de
-autenticação:
+Depois de subir os contêineres, aplique as migrations para criar as tabelas
+de autenticação e uploads:
 
 ```bash
 docker compose exec backend alembic upgrade head
@@ -62,7 +62,8 @@ estão em **[docs/setup.md](docs/setup.md)**; os endpoints disponíveis em
 ```text
 backend/     API FastAPI em camadas (api → services → repositories → db)
 etl/         Motor ETL (extractors, transformers, loaders)
-frontend/    React + TypeScript — auth completa, Design System, dashboard e navegação
+frontend/    React + TypeScript — auth completa, Design System, uploads e navegação
+storage/     Arquivos enviados via upload (bind mount, fora do Git)
 docker/      Dockerfiles e configuração do Nginx
 docs/        Documentação do projeto
 .github/     Pipelines de CI
@@ -112,8 +113,8 @@ somadas ao build das imagens Docker de produção.
 | 0      | Foundation                          | ✅ Concluída |
 | 1      | Authentication                      | ✅ Concluída |
 | 2      | Design System & Frontend Foundation | ✅ Concluída |
-| 3      | File Import                         | ⏳ Próxima   |
-| 4      | ETL Engine                          | ⬜ Planejada |
+| 3      | File Import                         | ✅ Concluída |
+| 4      | ETL Engine                          | ⏳ Próxima   |
 | 5      | Analytics Dashboard                 | ⬜ Planejada |
 | 6      | Business Insights                   | ⬜ Planejada |
 | 7      | Release Candidate                   | ⬜ Planejada |

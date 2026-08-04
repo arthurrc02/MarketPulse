@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import auth, health, users
+from app.api.routes import auth, health, uploads, users
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -13,4 +13,5 @@ api_router.include_router(health.router)
 v1_router = APIRouter(prefix=settings.API_V1_PREFIX)
 v1_router.include_router(auth.router)
 v1_router.include_router(users.router)
+v1_router.include_router(uploads.router)
 api_router.include_router(v1_router)

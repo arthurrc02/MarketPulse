@@ -7,6 +7,7 @@ import { InsightsPage } from '@/pages/InsightsPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { UploadDetailPage } from '@/pages/UploadDetailPage'
 import { UploadsPage } from '@/pages/UploadsPage'
 import { ProtectedRoute } from '@/routes/ProtectedRoute'
 import { PublicOnlyRoute } from '@/routes/PublicOnlyRoute'
@@ -42,6 +43,7 @@ export function AppRoutes() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="uploads" element={<UploadsPage />} />
+        <Route path="uploads/:id" element={<UploadDetailPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="insights" element={<InsightsPage />} />
         <Route path="settings" element={<SettingsPage />} />

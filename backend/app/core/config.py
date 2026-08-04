@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # -- Uploads -------------------------------------------------------------
+    # Local, organizado por usuário: `{UPLOAD_STORAGE_DIR}/{user_id}/{stored_filename}`.
+    # Sem S3/nuvem nesta sprint (ver decisions.md).
+    UPLOAD_STORAGE_DIR: Path = REPO_ROOT / "storage" / "uploads"
+    MAX_UPLOAD_SIZE_BYTES: int = 10 * 1024 * 1024  # 10 MiB
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:

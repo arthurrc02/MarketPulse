@@ -27,6 +27,10 @@ frontend/coverage
 *.env
 !*.env.example
 
+# Arquivos enviados pelos usuários — nunca devem entrar na imagem
+storage/uploads/*
+!storage/uploads/.gitkeep
+
 # Docs e artefatos que não afetam o build
 docs
 README.md

@@ -44,6 +44,10 @@ services:
       # não é sobrescrito pelos mounts.
       - ./backend:/app/backend
       - ./etl:/app/etl
+      # Storage local dos uploads — bind mount (não volume nomeado) para os
+      # arquivos ficarem inspecionáveis diretamente em `storage/uploads/` no
+      # host, útil em desenvolvimento e para o motor ETL da Sprint 4.
+      - ./storage:/app/storage
     depends_on:
       postgres:
         condition: service_healthy

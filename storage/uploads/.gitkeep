@@ -1,0 +1,3 @@
+# Os arquivos enviados pelos usuários são gravados aqui, em
+# storage/uploads/{user_id}/{stored_filename} — nunca versionados.
+# Este arquivo apenas garante que o diretório exista no repositório.

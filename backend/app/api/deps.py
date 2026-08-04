@@ -13,6 +13,8 @@ from app.db.session import get_session
 from app.models.user import User
 from app.services.auth import AuthService
 from app.services.health import HealthService
+from app.services.upload import UploadService
+from app.storage.local import LocalFileStorage
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -61,3 +63,14 @@ def get_current_user(
 
 
 CurrentUserDep = Annotated[User, Depends(get_current_user)]
+
+
+def get_upload_service(session: SessionDep, settings: SettingsDep) -> UploadService:
+    """Injeta o serviço de upload, com o storage local apontando para `UPLOAD_STORAGE_DIR`."""
+    storage = LocalFileStorage(settings.UPLOAD_STORAGE_DIR)
+    return UploadService(
+        session=session, storage=storage, max_upload_size_bytes=settings.MAX_UPLOAD_SIZE_BYTES
+    )
+
+
+UploadServiceDep = Annotated[UploadService, Depends(get_upload_service)]
