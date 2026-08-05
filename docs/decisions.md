@@ -1154,6 +1154,15 @@ marketplace novo com cabeçalhos parecidos poderia criar ambiguidade
 (`len(matches) > 1`), tratada como o mesmo `UnknownMarketplaceError`, nunca
 uma escolha arbitrária de qual marketplace "vale mais".
 
+> **Atualização (hotfix Sprint 4.1 — ver [ADR-060](#adr-060--detecção-da-shopee-por-assinatura-de-conceitos-hotfix-sprint-41-não-mais-por-cabeçalhos-fixos)):**
+> um relatório oficial real da Shopee usa nomes de coluna diferentes do
+> conjunto fictício desta sprint, e o "conjunto fixo exigido" descrito acima
+> se mostrou frágil demais para esse caso. O contrato geral (`matches()`,
+> `detect_marketplace`, tratamento de ambiguidade) permanece o desta ADR;
+> só o `ShopeeDetector` passou a usar uma assinatura de conceitos com
+> múltiplas grafias aceitas, em vez de um conjunto fixo. `MercadoLivreDetector`
+> continua exatamente como descrito aqui.
+
 ---
 
 ## ADR-048 — Validação do esquema canônico como função compartilhada, não uma classe por marketplace
@@ -1539,3 +1548,84 @@ MyPy — aceitável: é plumbing de fixtures (fábricas de CSV de exemplo), não
 lógica de negócio. Todo o resto do pacote `etl` (incluindo os outros
 arquivos de teste, que só usam as fixtures via injeção de parâmetro do
 Pytest, nunca via `import`) continua com checagem estrita normal.
+
+---
+
+## ADR-060 — Detecção da Shopee por assinatura de conceitos (hotfix Sprint 4.1), não mais por cabeçalhos fixos
+
+**Sprint:** 4 (hotfix 4.1) · **Status:** Aceita
+
+**Contexto.** O [ADR-047](#adr-047--detecção-de-marketplace-por-conjunto-de-cabeçalhos-sem-ia)
+fixou a estratégia de detecção: cada `MarketplaceDetector` exige um
+conjunto fixo e completo de cabeçalhos, testado por `issubset()`. Funcionou
+para o formato de exemplo fictício da Sprint 4, mas um relatório oficial
+real da Shopee (XLSX, baixado do Seller Center, PT-BR) foi rejeitado com
+"marketplace desconhecido": o arquivo real tem ~29 colunas, com nomes que
+não coincidem com o conjunto fictício de 7 colunas do formato de exemplo
+(`status_do_pedido` vs. `status`, `nome_do_produto` vs. `produto`,
+`preco_acordado` vs. `preco_unitario`, `data_de_criacao_do_pedido` vs.
+`data_do_pedido`, entre outros) — exigir todos os 7 nomes exatos não
+sobrevive à primeira exportação real.
+
+**Decisão.** `ShopeeDetector` passa a reconhecer o arquivo por uma
+**assinatura de 5 conceitos característicos** (identificador do pedido,
+status do pedido, nome do produto, quantidade, valor monetário do item),
+cada um aceitando múltiplas grafias (PT-BR, EN, variações comuns) via
+`etl.detectors.signature.concept()`. Basta uma grafia de cada conceito
+estar presente — não o conjunto completo de nenhum formato específico. A
+comparação usa uma normalização mais agressiva que
+`etl.parsing.normalize_column_name` (`etl.detectors.signature.signature_key`):
+remove acentos (decomposição NFKD) e qualquer caractere não alfanumérico,
+então "ID do Pedido", "Id do  Pedido" e "id_do_pedido" (já normalizado por
+`peek_headers`) colapsam para a mesma chave.
+
+**Alternativas descartadas.**
+
+- _Adicionar os ~29 cabeçalhos reais da Shopee ao conjunto exigido_:
+  resolveria este arquivo específico, mas reproduziria o mesmo problema na
+  próxima variação do relatório (uma coluna nova do Seller Center, uma
+  tradução diferente) — trata o sintoma, não a causa raiz.
+- _Reduzir o conjunto exigido para as mesmas 5-7 colunas, mas continuar
+  exigindo o conjunto completo, sem alias de idioma_: mais simples, mas não
+  resolveria arquivos em inglês nem pequenas variações de grafia — dois
+  requisitos explícitos do hotfix.
+- _Aplicar a mesma normalização agressiva (`signature_key`) já em
+  `etl.parsing.normalize_column_name`_: unificaria os dois normalizadores,
+  mas alteraria os nomes de coluna que chegam ao `Extractor`/`Transformer`
+  (que hoje dependem de `data_do_pedido`, não `datadopedido`) — mudaria
+  componentes fora do escopo do hotfix ("não alterar Extractors/
+  Transformers"). Mantida como função separada, usada só pela detecção.
+
+**Consequências.** O relatório oficial real (PT-BR) e um equivalente em
+inglês passam a ser reconhecidos — testado em
+`test_shopee_signature_detection.py` contra o cabeçalho real completo (CSV
+e XLSX), ordem embaralhada, colunas extras, ausência de cada um dos 5
+conceitos e uma planilha alheia. A suíte pré-existente do pacote `etl`
+continua passando sem nenhuma alteração: os aliases de cada conceito foram
+escolhidos deliberadamente para cobrir tanto o formato de exemplo fictício
+da Sprint 4 (`"Status"`, `"Produto"`, `"Preco Unitario"` como grafias
+aceitas) quanto o relatório oficial real, sem editar nenhum fixture ou
+teste existente. `MercadoLivreDetector` **não** foi alterado — continua
+usando a estratégia de conjunto fixo do ADR-047; adotar a mesma assinatura
+por conceito para ele é uma melhoria futura natural, não parte deste
+hotfix.
+
+**Risco aceito.** Exigir apenas 5 conceitos (em vez de um conjunto grande e
+exclusivo) amplia, em teoria, a chance de uma planilha genérica não-Shopee
+ser reconhecida por engano, caso tenha simultaneamente colunas de
+id/status/produto/quantidade/valor com uma das grafias aceitas. Julgado
+aceitável: as grafias continuam específicas o bastante (não são só
+"id"/"nome"/"valor" soltos), e é exatamente o trade-off pedido
+explicitamente pelo hotfix ("não deve depender de dezenas de colunas... use
+uma assinatura suficientemente característica").
+
+**Impacto futuro.** Este hotfix resolve a **detecção** — não garante que o
+`ShopeeTransformer` atual processe corretamente o conteúdo de um relatório
+oficial real, cujas colunas de negócio (preço, data, status) têm nomes e
+formatos diferentes do formato fictício de exemplo. Um upload real da
+Shopee agora é corretamente roteado para o pipeline Shopee, mas a etapa de
+transformação ainda pode falhar com `TransformationError` ao tentar ler
+colunas que o arquivo real não tem sob esses nomes — ajustar
+`ShopeeTransformer` para o layout real é trabalho futuro, fora do escopo
+deste hotfix (que a restrição do hotfix explicitamente proíbe: "não
+alterar... Transformers").

@@ -231,12 +231,26 @@ orquestrador, no model ou nos endpoints.
   transformers, pipeline) e 14 no backend (CSV/XLSX válidos, marketplace
   desconhecido, arquivo ilegível, dados inválidos, reprocessamento
   idempotente, cascata de exclusão), além de 8 novos testes de frontend
-  (botão processar, polling, estados de sucesso/erro). 136 testes de backend
-  no total (era 91), 139 de frontend (era 131).
+  (botão processar, polling, estados de sucesso/erro). 91 testes de backend
+  no total (era 77), 139 de frontend (era 131); `uv run pytest` na raiz
+  (backend + etl juntos, ver `pyproject.toml`) soma 136.
 - Validação real via Docker Compose: upload e processamento de um CSV real
   contra o alvo `production` do backend (não só `development`), incluindo o
   caso de marketplace desconhecido (rollback — nenhum `OrderItem` parcial) e
   reprocessamento idempotente.
+
+**Hotfix 4.1 (pós-sprint):** um relatório oficial real da Shopee (XLSX,
+Seller Center) era rejeitado como "marketplace desconhecido" — o conjunto
+de cabeçalhos fictício desta sprint não coincide com os nomes reais de
+coluna. `ShopeeDetector` passou a reconhecer o arquivo por uma assinatura de
+5 conceitos característicos (PT-BR/EN, com pequenas variações de grafia),
+em vez de um conjunto fixo e completo — ver
+[ADR-060](decisions.md#adr-060--detecção-da-shopee-por-assinatura-de-conceitos-hotfix-sprint-41-não-mais-por-cabeçalhos-fixos).
+Só a detecção mudou; `Extractor`/`Transformer`/`Loader`/`ETLPipeline` e a
+API permanecem como entregues nesta sprint — um relatório real da Shopee
+agora é corretamente roteado ao pipeline Shopee, mas o `ShopeeTransformer`
+ainda espera os nomes de coluna do formato fictício de exemplo (ajustá-lo
+ao layout real é trabalho futuro, fora deste hotfix).
 
 **Fora de escopo (por decisão, fica para sprints futuras):** Amazon e Magalu
 (arquitetura pronta, sem detector ainda), fila real (Celery/Dramatiq/RQ —
