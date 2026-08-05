@@ -161,3 +161,13 @@ export const InboxIcon = createIcon(
     strokeLinejoin="round"
   />,
 )
+
+export const PlayIcon = createIcon(
+  <path
+    d="M7 4.5v15l13-7.5-13-7.5Z"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />,
+)

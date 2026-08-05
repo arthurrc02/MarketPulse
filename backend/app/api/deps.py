@@ -12,6 +12,7 @@ from app.core.security import TokenDecodeError, decode_access_token
 from app.db.session import get_session
 from app.models.user import User
 from app.services.auth import AuthService
+from app.services.etl_processor import ETLProcessorService
 from app.services.health import HealthService
 from app.services.upload import UploadService
 from app.storage.local import LocalFileStorage
@@ -74,3 +75,12 @@ def get_upload_service(session: SessionDep, settings: SettingsDep) -> UploadServ
 
 
 UploadServiceDep = Annotated[UploadService, Depends(get_upload_service)]
+
+
+def get_etl_processor_service(session: SessionDep, settings: SettingsDep) -> ETLProcessorService:
+    """Injeta o serviço de processamento ETL, com o mesmo storage do upload."""
+    storage = LocalFileStorage(settings.UPLOAD_STORAGE_DIR)
+    return ETLProcessorService(session=session, storage=storage)
+
+
+ETLProcessorServiceDep = Annotated[ETLProcessorService, Depends(get_etl_processor_service)]

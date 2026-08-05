@@ -15,6 +15,9 @@ export interface UploadRecord {
   fileSize: number
   mimeType: string
   status: UploadStatus
+  errorMessage: string | null
+  startedAt: string | null
+  finishedAt: string | null
   uploadedAt: string
 }
 
@@ -24,6 +27,9 @@ interface UploadResponseBody {
   file_size: number
   mime_type: string
   status: UploadStatus
+  error_message: string | null
+  started_at: string | null
+  finished_at: string | null
   uploaded_at: string
 }
 
@@ -34,6 +40,9 @@ function mapUpload(body: UploadResponseBody): UploadRecord {
     fileSize: body.file_size,
     mimeType: body.mime_type,
     status: body.status,
+    errorMessage: body.error_message,
+    startedAt: body.started_at,
+    finishedAt: body.finished_at,
     uploadedAt: body.uploaded_at,
   }
 }
@@ -60,4 +69,11 @@ export async function createUpload(file: File): Promise<UploadRecord> {
 
 export async function deleteUpload(id: string): Promise<void> {
   await apiRequest(`/api/v1/uploads/${id}`, { method: 'DELETE' })
+}
+
+export async function processUpload(id: string): Promise<UploadRecord> {
+  const body = await apiRequest<UploadResponseBody>(`/api/v1/uploads/${id}/process`, {
+    method: 'POST',
+  })
+  return mapUpload(body)
 }

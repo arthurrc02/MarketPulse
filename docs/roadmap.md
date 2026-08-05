@@ -6,8 +6,8 @@
 | 1      | Authentication                      | ✅ Concluída |
 | 2      | Design System & Frontend Foundation | ✅ Concluída |
 | 3      | File Import                         | ✅ Concluída |
-| 4      | ETL Engine                          | ⏳ Próxima   |
-| 5      | Analytics Dashboard                 | ⬜ Planejada |
+| 4      | ETL Engine                          | ✅ Concluída |
+| 5      | Analytics Dashboard                 | ⏳ Próxima   |
 | 6      | Business Insights                   | ⬜ Planejada |
 | 7      | Release Candidate                   | ⬜ Planejada |
 
@@ -179,22 +179,74 @@ dashboards, analytics, insights.
 
 ---
 
-## Sprint 4 — ETL Engine ⏳
+## Sprint 4 — ETL Engine ✅
 
-**Objetivo:** implementar o processamento dos dados.
+**Objetivo:** implementar o motor de processamento que transforma os arquivos
+já enviados (Sprint 3) em dados estruturados — sem dashboard, sem
+analytics, sem IA.
 
-**Escopo previsto:**
+**Ajuste de escopo (decisão explícita, ver [decisions.md](decisions.md)):** em vez de
+implementar os quatro marketplaces da visão de produto de uma vez, a sprint
+entrega **dois formatos de exemplo completos** (Shopee e Mercado Livre,
+fictícios mas realistas) e uma arquitetura desenhada para que Amazon e Magalu
+sejam apenas mais um detector/extractor/transformer — sem tocar no
+orquestrador, no model ou nos endpoints.
 
-- Implementações de `Extractor`, `Transformer` e `Loader` para Shopee, Mercado
-  Livre, Amazon e Magalu.
-- Execução real de `ETLPipeline.run`.
-- Modelo canônico de pedidos e produtos, com as migrations correspondentes.
-- Tratamento de erros por linha e relatório de importação.
-- Testes com arquivos de exemplo de cada marketplace.
+**Entregue:**
+
+- Pacote `etl` totalmente implementado: `Extractor` → `Transformer` →
+  Validação → `Loader`, orquestrados por `ETLPipeline.run` (antes,
+  `NotImplementedError`). Cada etapa continua com responsabilidade única.
+- Detecção automática de marketplace por cabeçalho (`etl.detectors`), sem IA
+  — conjuntos de colunas exigidos, disjuntos entre marketplaces. Cabeçalho
+  não reconhecido (ou ambíguo) vira `UnknownMarketplaceError` → upload
+  `failed`.
+- Parser resiliente (`etl.parsing`): CSV e XLSX, cabeçalhos normalizados
+  (espaço → `_`, minúsculo), colunas fora de ordem ou extras não quebram a
+  leitura, `dtype=str` preserva zeros à esquerda em SKUs/IDs.
+- Regras de transformação centralizadas (`etl.transformers.common`): valores
+  monetários em centavos (evita erro de ponto flutuante), datas `dd/mm/aaaa`,
+  percentuais, status por marketplace mapeado para um `OrderStatus`
+  canônico (status desconhecido vira `UNKNOWN`, não interrompe o arquivo).
+- Model `OrderItem` (uma linha por item de pedido, não `Order`/`Product`
+  separados — ver ADR) + campos `started_at`/`finished_at` em `Upload`, com
+  migration própria validada `upgrade`/`downgrade`/`upgrade` contra
+  PostgreSQL real.
+- `OrderItemLoader` (adapta o contrato `Loader` do `etl` para SQLAlchemy):
+  insere em lote (`INSERT` multi-linha único) e substitui itens de uma
+  tentativa anterior antes de inserir — reprocessar um upload é idempotente.
+- `ETLProcessorService`: orquestra detecção → pipeline → status do upload
+  (`uploaded` → `processing` → `processed`/`failed`), sempre a partir de um
+  `upload_id` — a mesma assinatura que um worker de fila chamaria no futuro,
+  sem reescrever o pipeline.
+- Endpoint `POST /api/v1/uploads/{id}/process` — síncrono nesta sprint,
+  sempre responde `200` com o resultado (mesmo em falha de processamento);
+  `404` só para upload inexistente/de outro usuário.
+- Frontend: botão "Processar" (Uploads e detalhe do upload), `useUploadQuery`
+  com polling enquanto `status === "processing"` (arquitetura pronta para
+  processamento assíncrono, mesmo síncrono hoje), `UploadDetailPage` exibindo
+  início/fim/duração/erro do processamento — nenhum dado extraído é
+  mostrado (fica para a Sprint 5).
+- 45 testes novos no pacote `etl` (parsing, schema, detectores, extractors,
+  transformers, pipeline) e 14 no backend (CSV/XLSX válidos, marketplace
+  desconhecido, arquivo ilegível, dados inválidos, reprocessamento
+  idempotente, cascata de exclusão), além de 8 novos testes de frontend
+  (botão processar, polling, estados de sucesso/erro). 136 testes de backend
+  no total (era 91), 139 de frontend (era 131).
+- Validação real via Docker Compose: upload e processamento de um CSV real
+  contra o alvo `production` do backend (não só `development`), incluindo o
+  caso de marketplace desconhecido (rollback — nenhum `OrderItem` parcial) e
+  reprocessamento idempotente.
+
+**Fora de escopo (por decisão, fica para sprints futuras):** Amazon e Magalu
+(arquitetura pronta, sem detector ainda), fila real (Celery/Dramatiq/RQ —
+processamento continua síncrono), tolerância a erro por linha (um arquivo com
+uma linha inválida falha inteiro, não parcialmente), dashboards, analytics,
+insights, OCR, IA.
 
 ---
 
-## Sprint 5 — Analytics Dashboard ⬜
+## Sprint 5 — Analytics Dashboard ⏳
 
 **Objetivo:** indicadores e gráficos.
 

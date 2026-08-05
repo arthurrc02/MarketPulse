@@ -22,4 +22,7 @@ class UploadRead(BaseModel):
     file_size: int
     mime_type: str
     status: UploadStatus
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
     uploaded_at: datetime

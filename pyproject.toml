@@ -70,6 +70,14 @@ indent-style = "space"
 [tool.mypy]
 python_version = "3.12"
 files = ["backend/app", "backend/tests", "etl/etl", "etl/tests"]
+# `backend/tests/conftest.py` e `etl/tests/conftest.py` são dois arquivos de
+# mesmo nome em diretórios `tests/` sem `__init__.py` (mesma colisão do
+# Pytest — ver ADR-012 em docs/decisions.md); sem um pacote real os
+# envolvendo, o MyPy não consegue distingui-los ("Duplicate module named
+# conftest"). Diferente do Pytest (`--import-mode=importlib`), o MyPy não
+# tem um modo equivalente para isso — excluir da checagem estrita é o trade-off
+# aceito: é plumbing de fixtures, não lógica de negócio.
+exclude = ["^etl/tests/conftest\\.py$"]
 strict = true
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
@@ -78,6 +86,11 @@ pretty = true
 
 [[tool.mypy.overrides]]
 module = ["alembic.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Sem stubs oficiais; usado só em testes para gerar um `.xlsx` de exemplo.
+module = ["openpyxl.*"]
 ignore_missing_imports = true
 
 [tool.pydantic-mypy]

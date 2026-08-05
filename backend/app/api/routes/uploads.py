@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, File, UploadFile, status
 
-from app.api.deps import CurrentUserDep, UploadServiceDep
+from app.api.deps import CurrentUserDep, ETLProcessorServiceDep, UploadServiceDep
 from app.schemas.errors import ErrorResponse
 from app.schemas.upload import UploadRead
 
@@ -70,3 +70,26 @@ def delete_upload(
 ) -> None:
     """Remove o arquivo em disco e o registro do upload."""
     upload_service.delete_upload(user=current_user, upload_id=upload_id)
+
+
+@router.post(
+    "/{upload_id}/process",
+    response_model=UploadRead,
+    summary="Processar um upload (ETL)",
+    responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}},
+)
+def process_upload(
+    upload_id: uuid.UUID, current_user: CurrentUserDep, etl_service: ETLProcessorServiceDep
+) -> UploadRead:
+    """Dispara o processamento ETL do upload e retorna o resultado.
+
+    Síncrono nesta sprint: a resposta só chega depois que o processamento
+    termina, com `status` já em `processed` ou `failed` (nunca `processing` —
+    ver [ADR em decisions.md]). Falhas de processamento (marketplace não
+    reconhecido, arquivo corrompido, dados inválidos) **não** viram erro
+    HTTP — voltam como `200` com `status: "failed"` e `error_message`
+    preenchido; só a ausência do upload (ou pertencer a outro usuário) é um
+    erro de requisição de verdade (`404`).
+    """
+    upload = etl_service.process_upload(user=current_user, upload_id=upload_id)
+    return UploadRead.model_validate(upload)

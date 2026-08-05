@@ -1052,3 +1052,490 @@ ou de dados de terceiros.
 diretamente (`FileUpload.test.tsx`, `Table.test.tsx`), sem API de terceiros
 para aprender. `Table` é genérica (`Table<T>`) o bastante para ser
 reaproveitada em listagens futuras (Sprint 5+) sem reescrita.
+
+---
+
+## ADR-045 — Dois formatos de exemplo (Shopee, Mercado Livre) em vez de quatro marketplaces completos
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O roadmap original previa `Extractor`/`Transformer`/`Loader`
+para os quatro marketplaces da visão de produto (Shopee, Mercado Livre,
+Amazon, Magalu) nesta sprint. Implementar os quatro de uma vez multiplicaria
+o trabalho repetitivo (mais formatos de coluna, mais casos de teste) sem
+validar nada de novo sobre a arquitetura em si — o quinto marketplace prova
+a extensibilidade tão bem quanto o segundo.
+
+**Decisão.** Implementar apenas dois formatos de exemplo completos (Shopee e
+Mercado Livre, com cabeçalhos fictícios mas realistas), com detector,
+extractor e transformer próprios, e desenhar a arquitetura (`etl/components.py`,
+`etl/detectors/registry.py`) para que Amazon e Magalu sejam só mais uma
+entrada em cada registro — sem alterar `ETLPipeline`, `OrderItem` ou os
+endpoints.
+
+**Alternativas descartadas.**
+
+- _Implementar os quatro marketplaces_: mais fiel ao roadmap original, mas
+  desproporcional ao objetivo real da sprint (arquitetura do motor ETL) — a
+  instrução explícita do usuário foi reduzir esse escopo para manter o foco.
+
+**Consequências.** `Marketplace.AMAZON`/`Marketplace.MAGALU` existem no enum
+(evita uma migration de enum quando forem implementados) mas
+`get_pipeline_components` levanta `UnknownMarketplaceError` para eles —
+testado explicitamente (`test_unimplemented_marketplaces_raise`), para que a
+ausência seja um erro claro, não um `KeyError` obscuro.
+
+---
+
+## ADR-046 — `Extractor.extract` recebe `FileSource` (stream + formato), não mais `Path`
+
+**Sprint:** 4 · **Status:** Aceita (substitui a assinatura provisória da Sprint 0)
+
+**Contexto.** O contrato `Extractor.extract(source: Path)`, escrito na
+Sprint 0 como placeholder, presumia um arquivo em disco. A Sprint 3 já havia
+antecipado o problema: `FileStorage.open()` devolve um `BinaryIO`, não um
+caminho — e o ADR-035 daquela sprint já registrava a intenção de a Sprint 4
+"chamar `storage.open()` para ler os uploads". Manter `Path` no contrato
+obrigaria o backend a vazar um caminho de disco para dentro do pacote `etl`,
+acoplando-o à implementação local do `FileStorage` e quebrando a promessa de
+trocar para S3 sem refatorar o motor ETL.
+
+**Decisão.** `Extractor.extract` passa a receber um `etl.parsing.FileSource`
+(`stream: BinaryIO` + `source_format: SourceFormat`) em vez de `Path`. O
+formato viaja ao lado do stream porque um `BinaryIO` puro não carrega
+extensão nem Content-Type — é a única informação que falta para escolher
+entre `pandas.read_csv`/`read_excel`.
+
+**Alternativas descartadas.**
+
+- _Manter `Path` e o backend gravar um arquivo temporário antes de chamar o
+  Extractor_: funcionaria, mas adicionaria I/O de disco desnecessário a cada
+  processamento e ainda acoplaria o motor ETL a "arquivos existem em disco",
+  o problema que se queria evitar.
+
+**Consequências.** `ETLProcessorService` chama `storage.open()` e passa o
+handle direto para o pipeline, sem tocar disco além do que o `FileStorage`
+já faz. `PipelineResult` perdeu o campo `source: Path` (não fazia mais
+sentido) — o resultado carrega só `marketplace`/`rows_extracted`/
+`rows_loaded`, já que quem chama o pipeline já sabe qual `Upload` está
+processando.
+
+---
+
+## ADR-047 — Detecção de marketplace por conjunto de cabeçalhos, sem IA
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O enunciado da sprint exige identificar automaticamente o
+marketplace de origem "baseado em cabeçalhos, estrutura, padrões
+conhecidos" e explicitamente proíbe IA. Havia duas formas razoáveis de
+comparar cabeçalhos: por igualdade exata do conjunto, ou por subconjunto
+(cabeçalhos exigidos ⊆ cabeçalhos do arquivo).
+
+**Decisão.** Cada `MarketplaceDetector` declara um conjunto fixo de
+cabeçalhos exigidos; `matches()` testa se esse conjunto é subconjunto dos
+cabeçalhos normalizados do arquivo (`etl.parsing.normalize_column_name`).
+`detect_marketplace` (`etl/detectors/registry.py`) testa todos os
+detectores registrados e levanta `UnknownMarketplaceError` se nenhum (ou
+mais de um) casar.
+
+**Alternativas descartadas.**
+
+- _Igualdade exata de conjunto_: mais rígida — uma coluna extra no arquivo
+  (comum em exportações reais, editadas manualmente) quebraria a detecção
+  sem motivo real, já que colunas extras não atrapalham o `Transformer`
+  (que só lê as colunas que conhece).
+
+**Consequências.** Detecção resiliente a colunas extras, testada
+explicitamente (`test_detection_ignores_column_order`,
+`test_partial_shopee_headers_are_not_detected`). Os dois conjuntos exigidos
+(Shopee, Mercado Livre) são desenhados deliberadamente disjuntos — um
+marketplace novo com cabeçalhos parecidos poderia criar ambiguidade
+(`len(matches) > 1`), tratada como o mesmo `UnknownMarketplaceError`, nunca
+uma escolha arbitrária de qual marketplace "vale mais".
+
+---
+
+## ADR-048 — Validação do esquema canônico como função compartilhada, não uma classe por marketplace
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O fluxo do enunciado desenha "Validação" como uma etapa
+própria, separada do Transformer: `Extractor → Transformer → Validação →
+Persistência`. Isso sugeriria uma quarta classe abstrata (`Validator`), com
+uma implementação por marketplace — seguindo o mesmo padrão de
+`Extractor`/`Transformer`/`Loader`.
+
+**Decisão.** A validação é uma função só (`etl.schema.validate_canonical_schema`),
+chamada pelo `ETLPipeline` entre `transform()` e `load()` — não uma classe
+com uma implementação por marketplace.
+
+**Alternativas descartadas.**
+
+- _`Validator` abstrato, uma implementação por marketplace_: replicaria o
+  padrão das outras três etapas, mas por definição, na hora em que a
+  validação roda, os dados já estão no esquema canônico — as regras
+  (`quantity >= 0`, `status` num conjunto fechado, `order_date` é uma data)
+  são as mesmas para qualquer marketplace de origem. Uma classe por
+  marketplace aqui seria abstração sem propósito real.
+
+**Consequências.** Um marketplace novo não precisa escrever nem testar
+lógica de validação — ganha a validação existente de graça, só por produzir
+o esquema canônico correto. A validação vive perto do próprio esquema
+(`etl/schema.py`, que também define `CANONICAL_COLUMNS`), facilitando manter
+as duas coisas em sincronia.
+
+---
+
+## ADR-049 — Valores monetários normalizados em centavos (inteiro), nunca `float`
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O enunciado pede normalização de "valores monetários" como
+parte da transformação. Guardar `49.90` como `float` é a opção óbvia, mas
+ponto flutuante binário não representa exatamente a maioria dos valores
+decimais — somas repetidas (faturamento agregado, Sprint 5) acumulam erro de
+arredondamento perceptível em valores financeiros.
+
+**Decisão.** `parse_brl_currency_to_cents` (`etl.transformers.common`)
+converte `"R$ 1.234,56"` para `123456` — um inteiro em centavos.
+`OrderItem.unit_price_cents`/`total_price_cents` são `Integer`, não
+`Numeric`/`Float`.
+
+**Alternativas descartadas.**
+
+- _`Decimal`_: resolveria a precisão sem converter para centavos, mas exige
+  serialização/deserialização cuidadosa em cada camada (JSON não tem
+  `Decimal` nativo) — inteiro é mais simples e igualmente exato para valores
+  monetários com duas casas decimais fixas.
+
+**Consequências.** Somas e agregações (Sprint 5) são aritmética de inteiro,
+sem erro de arredondamento. A conversão de volta para exibição (`R$ 1.234,56`)
+é responsabilidade de quem exibe (frontend/relatório), não do motor ETL —
+ainda não implementada, porque nenhuma tela mostra esses valores nesta
+sprint.
+
+---
+
+## ADR-050 — `OrderItem` denormalizado (um registro por item), reaproveitando os enums do pacote `etl`
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O roadmap fala em "modelo canônico de pedidos **e produtos**",
+o que sugeriria três tabelas normalizadas (`Order`, `OrderItem`, `Product`).
+Os indicadores previstos para a Sprint 5 (faturamento, produtos mais
+vendidos, ticket médio, desempenho por marketplace) operam todos na
+granularidade de item de pedido — nenhum precisa de um catálogo de produto
+deduplicado.
+
+**Decisão.** Uma única tabela `OrderItem`: cada linha é um item de pedido já
+padronizado (pedido + produto + quantidade + preço), com `user_id` e
+`upload_id` diretos (mesmo padrão de `Upload` — `ondelete="CASCADE"` nos
+dois). A coluna `marketplace` e `status` reaproveitam `etl.types.Marketplace`/
+`OrderStatus` diretamente no model do backend, em vez de redeclarar os
+mesmos valores como um enum próprio do SQLAlchemy.
+
+**Alternativas descartadas.**
+
+- _`Order` + `OrderItem` + `Product` normalizados_: modelo mais "correto"
+  academicamente, mas adiciona `JOIN`s a toda consulta de analytics sem
+  nenhum benefício prático nesta fase — não há hoje nenhuma necessidade de
+  deduplicar metadado de produto entre pedidos. Fica como melhoria futura se
+  um catálogo de produtos se tornar necessário.
+
+**Consequências.** Consultas de analytics (Sprint 5) leem uma tabela só,
+filtrando por `user_id`. Reaproveitar os enums do `etl` significa que o
+mesmo `Marketplace` que o pipeline detecta é literalmente o que fica
+gravado — nenhuma tradução, nenhum ponto onde os dois poderiam divergir.
+
+---
+
+## ADR-051 — Status de marketplace não mapeado vira `UNKNOWN`, não interrompe o arquivo
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** Cada marketplace tem seu próprio vocabulário de status
+("Concluido" na Shopee, "Entregue" no Mercado Livre). Um status que o
+`Transformer` não reconhece (uma grafia nova, um status introduzido depois)
+poderia ser tratado como erro fatal (falha a linha/arquivo inteiro) ou como
+um valor de fallback.
+
+**Decisão.** `map_status` (`etl.transformers.common`) traduz para
+`OrderStatus.UNKNOWN` quando o status bruto não está no mapeamento do
+marketplace — não levanta exceção.
+
+**Alternativas descartadas.**
+
+- _Falhar a linha/arquivo no status desconhecido_: mais rígido, mas um
+  marketplace real muda o texto de um status sem aviso (ex.: "Cancelado" →
+  "Cancelado pelo vendedor") com frequência maior do que muda a estrutura de
+  colunas — tratar isso como fatal derrubaria importações inteiras por um
+  problema cosmético, sem nenhum dado numérico (preço, quantidade, data)
+  comprometido.
+
+**Consequências.** Um status novo não quebra a importação — fica visível
+como `unknown` no dado persistido, sinalizando (para quem for consumir na
+Sprint 5+) que o mapeamento precisa ser atualizado, sem derrubar o resto do
+arquivo. `validate_canonical_schema` aceita `unknown` como um status válido
+(faz parte do conjunto fechado de `OrderStatus`).
+
+---
+
+## ADR-052 — Falha de transformação invalida o arquivo inteiro (sem tolerância por linha nesta sprint)
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O roadmap original citava "tratamento de erros por linha e
+relatório de importação" como parte da Sprint 4. A instrução de redução de
+escopo pediu para manter a sprint focada na arquitetura do ETL, evitando
+complexidade desnecessária — aceitar parcialmente um arquivo (algumas linhas
+importadas, outras rejeitadas) exigiria uma UI de relatório por linha, uma
+decisão de "o que é aceitável rejeitar" e persistência de erros por linha,
+nenhum dos quais existe ainda.
+
+**Decisão.** Uma linha com dado inválido (moeda ilegível, data fora do
+formato, quantidade negativa) faz `Transformer.transform()` inteiro levantar
+`TransformationError` — o arquivo inteiro falha, com a mensagem apontando a
+linha e a coluna problemática (`"linha 3: valor monetário inválido:
+'R$ abc'"`).
+
+**Alternativas descartadas.**
+
+- _Importar as linhas válidas, listar as inválidas num relatório_: mais
+  próximo do que produtos de mercado fazem, mas é uma funcionalidade em si
+  (relatório de importação parcial) — adiada explicitamente para manter o
+  foco da sprint na arquitetura, e listada abaixo como melhoria futura.
+
+**Consequências.** Mensagens de erro simples (uma por tentativa, não uma
+lista); nenhuma UI de "revisar linhas rejeitadas" a construir agora. Em
+troca, um arquivo com 999 linhas boas e 1 ruim falha por inteiro — aceitável
+para a fase atual do projeto, mas uma limitação real listada nas melhorias
+futuras do relatório da sprint.
+
+---
+
+## ADR-053 — Reprocessamento idempotente: o Loader substitui itens de tentativas anteriores
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O botão "Processar" pode ser clicado mais de uma vez no mesmo
+upload — por engano, ou deliberadamente depois de uma correção no
+transformer. Sem cuidado, cada nova tentativa bem-sucedida duplicaria os
+`OrderItem` já gravados por uma tentativa anterior.
+
+**Decisão.** `OrderItemLoader.load()` chama
+`OrderItemRepository.delete_for_upload(upload_id)` antes de inserir os novos
+itens, na mesma transação. Reprocessar um upload sempre resulta no mesmo
+conjunto final de itens — nunca duplicados.
+
+**Alternativas descartadas.**
+
+- _Bloquear reprocessamento de um upload já `processed`_: mais simples, mas
+  impede corrigir um transformer com bug e reprocessar sem excluir e
+  reenviar o arquivo — pior experiência sem ganho de segurança real (o
+  usuário só processa os próprios uploads).
+
+**Consequências.** Testado explicitamente
+(`test_reprocessing_replaces_order_items_instead_of_duplicating`): processar
+duas vezes o mesmo upload sempre deixa exatamente as linhas do arquivo, não
+o dobro. `delete` + `insert` na mesma transação do `Loader` — se o `insert`
+falhar depois, o `delete` também é desfeito pelo rollback do
+`ETLProcessorService`.
+
+---
+
+## ADR-054 — `process_upload` orquestra por `upload_id`, não por estado em memória — pronto para fila sem interface nova
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** O enunciado pede processamento síncrono nesta sprint, mas
+"estruturado para futura substituição por uma fila (Celery, Dramatiq, RQ)
+sem necessidade de reescrever o Pipeline". Uma abstração formal
+(`JobRunner`/`QueueAdapter`) com uma única implementação síncrona seria
+especulativa — não há um segundo caso de uso hoje para justificá-la.
+
+**Decisão.** `ETLProcessorService.process_upload(user, upload_id)` recebe só
+identificadores (usuário e id do upload) — nunca um handle de arquivo aberto,
+uma sessão de requisição HTTP ou qualquer estado que só exista durante o
+ciclo de vida da requisição síncrona atual. Isso é o que realmente importa
+para "pronto para fila": um worker de fila só precisa de um `session`
+(injeção de dependência já existente) e desses dois ids para chamar o mesmo
+método.
+
+**Alternativas descartadas.**
+
+- _Introduzir um `JobRunner` abstrato com implementação `SyncJobRunner`
+  agora_: sem um segundo caso de uso real (a fila em si), seria uma camada
+  extra sem comportamento distinto — puro YAGNI. A troca real, quando a fila
+  chegar, é o que acontece *dentro* do endpoint (chamar `.delay()` em vez de
+  chamar o service direto), não uma interface que precisa existir hoje.
+
+**Consequências.** O endpoint `process_upload` (router) é deliberadamente
+fino: resolve o usuário autenticado e chama
+`etl_service.process_upload(...)`. Trocar para fila real no futuro muda
+esse router (para enfileirar) e adiciona um worker que chama o mesmo
+`ETLProcessorService` — nem o `ETLPipeline`, nem `Extractor`/`Transformer`/
+`Loader`, nem o model `Upload`/`OrderItem` precisam mudar.
+
+---
+
+## ADR-055 — Resposta HTTP sempre `200` no endpoint de processamento; falha vira dado, não erro HTTP
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** Uma falha de processamento (marketplace não reconhecido,
+arquivo corrompido, dado inválido) poderia ser modelada como um erro HTTP
+(4xx/5xx, no padrão dos outros erros de domínio do projeto — `AppError` →
+exception handler) ou como um resultado válido da operação.
+
+**Decisão.** `POST /uploads/{id}/process` sempre responde `200` com o
+`UploadRead` resultante — `status: "processed"` ou `status: "failed"` +
+`error_message`. Só `401`/`404` (autenticação/posse do upload) são erros de
+requisição de verdade.
+
+**Alternativas descartadas.**
+
+- _`422`/`400` quando o processamento falha_: seguiria o padrão de erro de
+  domínio já estabelecido (`AppError`), mas semanticamente incorreto aqui —
+  a requisição "processe este upload" foi executada com sucesso; o
+  *resultado* é que o arquivo não pôde ser processado. É o mesmo raciocínio
+  de um pipeline de CI: o job rodar e "falhar" não é o mesmo que a chamada
+  para disparar o job ter falhado.
+
+**Consequências.** O frontend trata sucesso/falha de processamento como um
+`if (result.status === 'processed')`, não como um `catch` — o `catch` do
+`useMutation` continua reservado para falhas de rede/requisição de verdade
+(ver ADR-056 sobre por que isso simplifica o código da página).
+
+---
+
+## ADR-056 — `Upload.status = processing` é commitado antes do pipeline rodar
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** `ETLProcessorService.process_upload` muda o status para
+`processing` e só depois executa o pipeline (que pode demorar, ler arquivo,
+tocar banco). Era preciso decidir se essa mudança de status entra na mesma
+transação do resultado final, ou é commitada à parte.
+
+**Decisão.** `upload.status = PROCESSING` é commitado imediatamente, antes
+de `_run_pipeline` ser chamado. Se o pipeline falhar, um `rollback()` desfaz
+só o que a tentativa de carga inseriu (nunca o `processing` já commitado),
+e o status final (`processed`/`failed`) é commitado numa transação nova.
+
+**Alternativas descartadas.**
+
+- _Uma única transação do início ao fim_: mais simples, mas esconderia o
+  estado "processando" de qualquer outra requisição que consultasse o mesmo
+  upload nesse meio-tempo (irrelevante nesta sprint, síncrona, mas seria
+  necessário assim que o processamento passasse a ser assíncrono/mais longo
+  — ADR-054).
+
+**Consequências.** `upload.error_message`/`started_at` são zerados no início
+de cada tentativa (não acumulam de tentativas antigas). Uma falha
+inesperada (não só `ETLError`) também é capturada — vira `status = failed`
+com uma mensagem genérica, nunca deixa o upload preso em `processing`
+indefinidamente por um bug não previsto.
+
+---
+
+## ADR-057 — Polling no frontend mesmo com processamento síncrono nesta sprint
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** Como o processamento é síncrono (ADR-054/055), a resposta de
+`POST /process` já chega com o resultado final — não há, hoje, nenhum
+momento em que o frontend observaria `status: "processing"` via polling.
+Ainda assim, o enunciado pede explicitamente "atualização automática do
+status" e "polling" como parte dos testes de frontend.
+
+**Decisão.** `useUploadQuery` usa `refetchInterval` do React Query,
+reconsultando a cada 1,5s enquanto `status === "processing"` — mecanismo que
+hoje nunca chega a repetir de verdade (a resposta síncrona já resolve o
+status antes do primeiro refetch), mas que funciona sem nenhuma mudança de
+código no dia em que o backend passar a responder `"processing"` por mais
+tempo (fila real).
+
+**Alternativas descartadas.**
+
+- _Não implementar polling agora, adicionar quando a fila existir_: mais
+  simples hoje, mas o enunciado pede a UI já preparada para essa
+  transição — e o teste (`polls while the upload is processing until it
+  settles`) simula exatamente esse cenário futuro mockando uma primeira
+  resposta `"processing"`.
+
+**Consequências.** Zero mudança de frontend necessária quando o
+processamento virar assíncrono — o polling já existe e já é testado. O
+custo é um `refetchInterval` que nunca dispara de verdade em produção nesta
+sprint, um mecanismo "adiantado" documentado aqui para não parecer código
+morto numa revisão futura.
+
+---
+
+## ADR-058 — `PRAGMA foreign_keys=ON` no engine de teste SQLite
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** Achado durante a revisão técnica desta sprint:
+`test_deleting_an_upload_cascades_to_its_order_items` passava contra
+PostgreSQL real, mas falhava contra o SQLite em memória usado por padrão
+(ADR-019) — os `OrderItem` de um upload excluído continuavam no banco.
+SQLite **ignora `ON DELETE CASCADE` por padrão**; cada conexão precisa ligar
+o enforcement de FK explicitamente, algo que a suíte nunca precisou fazer
+antes porque nenhum teste anterior dependia de cascade em nível de banco
+(as cascatas `User → RefreshToken`/`Upload` sempre foram exercitadas via
+delete do ORM, não via SQL direto).
+
+**Decisão.** A fixture `engine` (`backend/tests/conftest.py`) registra um
+listener `PRAGMA foreign_keys=ON` em toda conexão SQLite, via
+`sqlalchemy.event.listens_for`.
+
+**Alternativas descartadas.**
+
+- _Testar cascata só contra Postgres (`TEST_DATABASE_URL`)_: esconderia a
+  suíte padrão (SQLite, sem dependência externa) de uma classe inteira de
+  bug — exatamente o racional já registrado no ADR-019 para rodar contra os
+  dois dialetos.
+
+**Consequências.** O comportamento de cascade em nível de banco agora é
+verificado tanto no SQLite quanto no Postgres da CI, sem exigir Postgres
+local para pegar uma regressão. Fixture isolada por `is_sqlite`, sem afetar
+o engine quando `TEST_DATABASE_URL` aponta para Postgres.
+
+---
+
+## ADR-059 — MyPy exclui `etl/tests/conftest.py` — colisão de nome com `backend/tests/conftest.py`
+
+**Sprint:** 4 · **Status:** Aceita
+
+**Contexto.** `backend/tests/` e `etl/tests/` já colidiam por nome para o
+Pytest (ambos os diretórios se chamam `tests`, sem `__init__.py`) — resolvido
+na Sprint 0 com `--import-mode=importlib` (ADR-012). A Sprint 4 criou o
+primeiro `etl/tests/conftest.py` (fixtures de CSV de exemplo compartilhadas
+entre os testes do pacote `etl`); isso expôs a mesma colisão para o **MyPy**,
+que não tem um modo equivalente ao `--import-mode=importlib` do Pytest — ele
+precisa de um nome de módulo globalmente único por arquivo, e sem um pacote
+real envolvendo os dois diretórios, ambos resolvem para o mesmo nome curto
+`conftest`, gerando `Duplicate module named "conftest"`.
+
+**Decisão.** `exclude = ["^etl/tests/conftest\\.py$"]` em `[tool.mypy]`
+(`pyproject.toml`). Uma tentativa anterior de corrigir via
+`explicit_package_bases`/`mypy_path` foi descartada — quebrava a resolução
+de `app`/`etl` como pacotes do workspace em todo o resto do projeto (211
+erros novos), um raio de impacto desproporcional a um problema isolado em
+dois arquivos de fixture.
+
+**Alternativas descartadas.**
+
+- `explicit_package_bases = true` + `mypy_path = "."`: tecnicamente
+  resolveria o nome do módulo, mas mudou como o MyPy encontra `app`/`etl`
+  como pacotes instalados do workspace — regressão ampla, revertida.
+- Dar `__init__.py` a `backend/tests`/`etl/tests`: resolveria os dois
+  problemas (Pytest e MyPy) na raiz, mas reabre exatamente o que o ADR-012
+  evitou deliberadamente na Sprint 0.
+
+**Consequências.** `etl/tests/conftest.py` fica fora da checagem estrita do
+MyPy — aceitável: é plumbing de fixtures (fábricas de CSV de exemplo), não
+lógica de negócio. Todo o resto do pacote `etl` (incluindo os outros
+arquivos de teste, que só usam as fixtures via injeção de parâmetro do
+Pytest, nunca via `import`) continua com checagem estrita normal.

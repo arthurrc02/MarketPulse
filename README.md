@@ -9,12 +9,13 @@ negócio. O MarketPulse importa arquivos CSV e Excel de **Shopee, Mercado Livre,
 Amazon e Magalu**, padroniza tudo em um único modelo de dados e apresenta
 indicadores, gráficos e insights automáticos em um dashboard moderno.
 
-> **Status:** Sprint 3 (File Import) concluída. Usuários autenticados já
-> conseguem enviar arquivos CSV/XLSX (drag & drop ou seleção manual),
-> acompanhar o histórico de uploads, ver detalhes e excluir arquivos — tudo
-> armazenado localmente, organizado por usuário. Nenhum processamento do
-> conteúdo dos arquivos (parsing, detecção de marketplace, dashboards,
-> insights) existe ainda — começam na Sprint 4 em diante.
+> **Status:** Sprint 4 (ETL Engine) concluída. Além do upload (Sprint 3),
+> usuários já conseguem processar seus arquivos: o motor ETL detecta o
+> marketplace de origem automaticamente (dois formatos de exemplo — Shopee e
+> Mercado Livre, arquitetura pronta para os demais), normaliza os dados
+> (moeda, data, percentual) e persiste os itens padronizados. Nenhum
+> dashboard, gráfico ou insight sobre esses dados existe ainda — começam na
+> Sprint 5 em diante.
 
 ---
 
@@ -114,7 +115,7 @@ somadas ao build das imagens Docker de produção.
 | 1      | Authentication                      | ✅ Concluída |
 | 2      | Design System & Frontend Foundation | ✅ Concluída |
 | 3      | File Import                         | ✅ Concluída |
-| 4      | ETL Engine                          | ⏳ Próxima   |
-| 5      | Analytics Dashboard                 | ⬜ Planejada |
+| 4      | ETL Engine                          | ✅ Concluída |
+| 5      | Analytics Dashboard                 | ⏳ Próxima   |
 | 6      | Business Insights                   | ⬜ Planejada |
 | 7      | Release Candidate                   | ⬜ Planejada |

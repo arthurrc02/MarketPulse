@@ -19,6 +19,9 @@ function makeUpload(overrides: Partial<UploadRecord> = {}): UploadRecord {
     fileSize: 2048,
     mimeType: 'text/csv',
     status: 'uploaded',
+    errorMessage: null,
+    startedAt: null,
+    finishedAt: null,
     uploadedAt: '2026-01-01T10:00:00Z',
     ...overrides,
   }
@@ -173,5 +176,50 @@ describe('UploadsPage', () => {
     await user.click(screen.getByRole('link', { name: 'a.csv' }))
 
     expect(await screen.findByText('DETAIL_MARKER')).toBeInTheDocument()
+  })
+
+  it('processes an upload and shows a success toast', async () => {
+    mockedUploadsApi.listUploads.mockResolvedValue([makeUpload({ originalFilename: 'a.csv' })])
+    mockedUploadsApi.processUpload.mockResolvedValue(
+      makeUpload({ originalFilename: 'a.csv', status: 'processed' }),
+    )
+    const user = userEvent.setup()
+    renderUploadsPage()
+    await screen.findByText('a.csv')
+
+    await user.click(screen.getByRole('button', { name: 'Processar a.csv' }))
+
+    expect(mockedUploadsApi.processUpload).toHaveBeenCalledWith('1', expect.anything())
+    expect(await screen.findByText('a.csv processado com sucesso.')).toBeInTheDocument()
+  })
+
+  it('shows an error toast with the failure reason when processing fails', async () => {
+    mockedUploadsApi.listUploads.mockResolvedValue([makeUpload({ originalFilename: 'a.csv' })])
+    mockedUploadsApi.processUpload.mockResolvedValue(
+      makeUpload({
+        originalFilename: 'a.csv',
+        status: 'failed',
+        errorMessage: 'Marketplace não reconhecido.',
+      }),
+    )
+    const user = userEvent.setup()
+    renderUploadsPage()
+    await screen.findByText('a.csv')
+
+    await user.click(screen.getByRole('button', { name: 'Processar a.csv' }))
+
+    expect(await screen.findByText('Marketplace não reconhecido.')).toBeInTheDocument()
+  })
+
+  it('shows a generic error toast when the process request itself fails', async () => {
+    mockedUploadsApi.listUploads.mockResolvedValue([makeUpload({ originalFilename: 'a.csv' })])
+    mockedUploadsApi.processUpload.mockRejectedValue(new Error('network down'))
+    const user = userEvent.setup()
+    renderUploadsPage()
+    await screen.findByText('a.csv')
+
+    await user.click(screen.getByRole('button', { name: 'Processar a.csv' }))
+
+    expect(await screen.findByText('Não foi possível processar o arquivo.')).toBeInTheDocument()
   })
 })

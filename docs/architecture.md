@@ -169,15 +169,18 @@ GET  /users/me       → protegido por get_current_user
 
 ## Upload de Arquivos (Backend)
 
-Implementado na Sprint 3. Endpoints e contratos completos em
-[api.md](api.md#uploads); aqui, apenas o desenho. **Nenhum processamento
-acontece nesta camada** — os arquivos só são validados e armazenados.
+Endpoints e contratos completos em [api.md](api.md#uploads); aqui, apenas o
+desenho. O upload em si (`POST`/`GET`/`DELETE`) só valida e armazena — o
+processamento (`POST /process`) é uma camada separada (ver "Processamento de
+Uploads (Backend)", abaixo), mantendo `UploadService` sem nenhuma regra de
+ETL.
 
 ```text
-POST   /uploads       → valida, gera stored_filename, grava e registra
-GET    /uploads       → lista os uploads do usuário (mais recente primeiro)
-GET    /uploads/{id}  → metadados de um upload do usuário
-DELETE /uploads/{id}  → remove o arquivo em disco e o registro
+POST   /uploads          → valida, gera stored_filename, grava e registra
+GET    /uploads          → lista os uploads do usuário (mais recente primeiro)
+GET    /uploads/{id}     → metadados de um upload do usuário
+POST   /uploads/{id}/process → processa (ETL) — Sprint 4
+DELETE /uploads/{id}     → remove o arquivo em disco, o registro e os OrderItem gerados
 ```
 
 | Peça                | Arquivo                        | Papel                                                          |
@@ -190,14 +193,15 @@ DELETE /uploads/{id}  → remove o arquivo em disco e o registro
 **Modelo de dados:** `id`, `user_id` (FK, `ondelete="CASCADE"`),
 `original_filename` (só exibição — nunca usado para montar caminho),
 `stored_filename` (`uuid4().hex` + extensão validada; opaco, evita colisão e
-*path traversal*), `file_size`, `mime_type`, `status`, `error_message`
-(nullable — preparado para a Sprint 4 relatar falhas de processamento),
-`uploaded_at`, `updated_at`.
+*path traversal*), `file_size`, `mime_type`, `status`, `error_message`,
+`started_at`/`finished_at` (Sprint 4 — preenchidos por
+`ETLProcessorService`), `uploaded_at`, `updated_at`.
 
-**`status` — `UploadStatus`:** `uploaded` (único valor emitido nesta sprint) →
-`queued` → `processing` → `processed` | `failed`. Os quatro últimos existem
-só para o motor ETL da Sprint 4 transicionar — ver ADR correspondente em
-decisions.md sobre por que o enum já nasce completo.
+**`status` — `UploadStatus`:** `uploaded` → `processing` → `processed` |
+`failed` (Sprint 4 implementa essa transição — ver "Processamento de
+Uploads (Backend)"). `queued` permanece no enum, reservado para quando uma
+fila real existir; nesta sprint o processamento é síncrono, então não há um
+estado "esperando na fila" a representar.
 
 ---
 
@@ -213,10 +217,10 @@ storage/
 ```
 
 `app/storage/base.py` define `FileStorage` (ABC): `save`, `open`, `delete`.
-`LocalFileStorage` é a única implementação. `open()` não é usado nesta
-sprint — existe para o motor ETL da Sprint 4 ler os uploads já existentes
-sem precisar de uma interface nova (ver a observação do enunciado da Sprint 3
-sobre preparar a base para a Sprint 4 sem refatoração).
+`LocalFileStorage` é a única implementação. `open()` — sem uso na Sprint 3 —
+é exatamente o que `ETLProcessorService` chama para ler um upload existente
+(Sprint 4), sem precisar de nenhuma interface nova nem refatoração no
+`UploadService`, no model `Upload` ou nos endpoints já existentes.
 
 Em Docker, `storage/` é um **bind mount** (`./storage:/app/storage`), não um
 volume nomeado — os arquivos ficam inspecionáveis diretamente no host, tanto
@@ -349,8 +353,8 @@ UploadDetailPage  →  useUploadQuery(id)  →  GET /uploads/{id}
 
 | Peça                        | Arquivo                                    | Papel                                                          |
 | ----------------------------- | --------------------------------------------- | ------------------------------------------------------------------ |
-| `uploads/api`                | `src/lib/uploads/api.ts`                       | Chamadas HTTP tipadas; `createUpload` monta o `FormData`.           |
-| `useUploads`                  | `src/hooks/useUploads.ts`                      | `useUploadsQuery`, `useUploadQuery`, `useCreateUploadMutation`, `useDeleteUploadMutation`. |
+| `uploads/api`                | `src/lib/uploads/api.ts`                       | Chamadas HTTP tipadas; `createUpload` monta o `FormData`; `processUpload` chama `POST /process`. |
+| `useUploads`                  | `src/hooks/useUploads.ts`                      | `useUploadsQuery`, `useUploadQuery` (com polling — ver abaixo), `useCreateUploadMutation`, `useDeleteUploadMutation`, `useProcessUploadMutation`. |
 | `FileUpload`                  | `src/components/ui/FileUpload.tsx`             | Dropzone (Design System) — cumpre a lacuna deixada em aberto na Sprint 2. |
 | `Table`                       | `src/components/ui/Table.tsx`                  | Tabela genérica (Design System), sem estado próprio de ordenação.   |
 | `UploadStatusBadge`           | `src/components/uploads/`                      | Composição de `Badge` específica do domínio — não é um primitivo do Design System. |
@@ -363,29 +367,132 @@ retrocompatível com todas as chamadas JSON existentes.
 
 ---
 
-## Arquitetura do ETL
+## Motor ETL (Sprint 4)
 
 ```text
-Extractor  →  Transformer  →  Loader
-  (lê)         (padroniza)     (persiste)
+Extractor  →  Transformer  →  Validação  →  Loader
+  (lê)         (padroniza)     (confere)     (persiste)
 ```
 
-O `ETLPipeline` recebe as três etapas por injeção, de modo que cada marketplace
-combine suas próprias implementações sem alterar o orquestrador:
+O `ETLPipeline` recebe `Extractor`, `Transformer` e `Loader` por injeção, de
+modo que cada marketplace combine suas próprias implementações sem alterar o
+orquestrador; a Validação é uma função compartilhada (não uma classe por
+marketplace), porque a essa altura os dados já estão no esquema canônico —
+as mesmas regras valem para qualquer origem.
 
-| Componente    | Diretório           | Responsabilidade                                          |
-| ------------- | ------------------- | --------------------------------------------------------- |
-| `Extractor`   | `etl/extractors/`   | Lê o arquivo de origem e devolve os dados brutos.          |
-| `Transformer` | `etl/transformers/` | Converte o formato do marketplace no modelo canônico.      |
-| `Loader`      | `etl/loaders/`      | Persiste os dados padronizados.                            |
-| `ETLPipeline` | `etl/pipeline.py`   | Encadeia as três etapas e resume o resultado.              |
+| Componente     | Diretório             | Responsabilidade                                            |
+| -------------- | ---------------------- | ------------------------------------------------------------- |
+| `Extractor`    | `etl/extractors/`      | Lê o arquivo (`FileSource`) e devolve os dados brutos.         |
+| `Transformer`  | `etl/transformers/`    | Converte o formato do marketplace no esquema canônico de pedidos. |
+| `validate_canonical_schema` | `etl/schema.py` | Confere que a saída do Transformer está completa e consistente. |
+| `Loader`       | `etl/loaders/`         | Contrato de persistência; implementação concreta no backend.   |
+| `ETLPipeline`  | `etl/pipeline.py`      | Encadeia as quatro etapas, reembrulhando qualquer falha na `ETLError` da etapa correspondente. |
 
-O módulo ETL não conhece SQLAlchemy nem os models do backend: o `Loader`
-concreto é injetado pela camada de serviço, mantendo o motor independente da
-infraestrutura de persistência.
+**Detecção de marketplace** (`etl/detectors/`, sem IA): cada `MarketplaceDetector`
+declara o conjunto de cabeçalhos que exige; `detect_marketplace` testa os
+cabeçalhos normalizados do arquivo contra cada detector registrado
+(`etl/detectors/registry.py`) e levanta `UnknownMarketplaceError` se nenhum
+(ou mais de um) reconhecer o arquivo.
 
-> Na Sprint 0 apenas os contratos existem. As implementações por marketplace
-> chegam na Sprint 4.
+**Leitura resiliente** (`etl/parsing.py`): `read_tabular_file` despacha entre
+`pandas.read_csv`/`read_excel` conforme o `SourceFormat`, sempre com
+`dtype=str` (conversão de tipo é responsabilidade do Transformer, não da
+leitura) e cabeçalhos normalizados (`" Data  Pedido "` → `"data_pedido"`) —
+resiliente a espaços, capitalização, ordem de coluna e colunas extras.
+`peek_headers` lê só o cabeçalho, para a detecção não precisar carregar o
+arquivo inteiro.
+
+**Transformação centralizada** (`etl/transformers/common.py`): todo
+marketplace usa os mesmos helpers para moeda (`"R$ 1.234,56"` → `123456`
+centavos, nunca `float`), data (`dd/mm/aaaa`), percentual e identificador —
+evita que cada `Transformer` reimplemente (e arrisque divergir de) o mesmo
+parsing. Status do marketplace vira um `OrderStatus` canônico fechado
+(`completed`/`pending`/`cancelled`/`refunded`/`unknown`); um status não
+mapeado vira `unknown`, não interrompe o arquivo.
+
+**Escopo desta sprint** (ver [decisions.md](decisions.md)): dois formatos de
+exemplo implementados — Shopee e Mercado Livre, com detector, extractor e
+transformer próprios (`etl/detectors|extractors|transformers/{shopee,mercado_livre}.py`).
+`Marketplace.AMAZON`/`Marketplace.MAGALU` existem no enum (visão de produto)
+mas sem implementação — adicionar um marketplace novo é um detector +
+extractor + transformer + uma entrada em `etl/components.py`, sem tocar no
+`ETLPipeline`, no model `OrderItem` nem nos endpoints.
+
+O módulo ETL continua sem conhecer SQLAlchemy nem os models do backend: o
+`Loader` concreto (`app/services/etl_loader.py`) é injetado pelo
+`ETLProcessorService`.
+
+---
+
+## Processamento de Uploads (Backend)
+
+```text
+POST /uploads/{id}/process
+        │
+        ▼
+ETLProcessorService.process_upload(user, upload_id)
+        │
+        ├── Upload.status = processing; started_at = agora  (commit imediato)
+        │
+        ├── storage.open(...)  →  FileSource
+        ├── peek_headers  →  detect_marketplace
+        ├── get_pipeline_components(marketplace)  →  Extractor, Transformer
+        ├── OrderItemLoader(...)
+        └── ETLPipeline.run(file_source)
+                │
+        ┌───────┴───────┐
+        ▼               ▼
+   sucesso           ETLError (ou exceção inesperada)
+        │               │
+        ▼               ▼
+processed          rollback → failed + error_message
+finished_at         finished_at
+```
+
+| Peça                | Arquivo                            | Papel                                                              |
+| -------------------- | ------------------------------------ | --------------------------------------------------------------------- |
+| `ETLProcessorService` | `app/services/etl_processor.py`    | Orquestra: resolve o `Upload`, monta o pipeline, traduz o resultado em status. Nenhuma regra de parsing/transformação mora aqui. |
+| `OrderItemLoader`    | `app/services/etl_loader.py`         | Implementa `etl.loaders.base.Loader`; delega a persistência ao repositório. |
+| `OrderItemRepository` | `app/repositories/order_item.py`   | `bulk_create` (um único `INSERT` multi-linha) e `delete_for_upload` (reprocessar é idempotente). |
+| `OrderItem`          | `app/models/order_item.py`           | Entidade persistida — uma linha por item de pedido já padronizado.    |
+
+**Transação:** `Upload.status = processing` é *commitado imediatamente*
+(visível a quem consultar o upload durante o processamento); se o pipeline
+falhar, só o que o `Loader` tiver inserido nessa tentativa é desfeito
+(`rollback`) antes de gravar `status = failed` numa transação nova — nunca há
+`OrderItem` parcial de uma tentativa malsucedida.
+
+**Sem fila real nesta sprint:** `process_upload` recebe só um `upload_id` (não
+um handle de arquivo aberto nem estado em memória) — é a característica que
+permite trocar "chamado direto pela rota" por "chamado por um worker Celery/
+Dramatiq/RQ" sem reescrever o `ETLPipeline`, o `Extractor`/`Transformer`/
+`Loader` ou o endpoint (só o que acontece *dentro* do endpoint mudaria). Ver
+ADR em decisions.md.
+
+**Resposta HTTP sempre `200`, mesmo em falha de processamento:** um
+marketplace não reconhecido ou um arquivo corrompido não é um erro da
+requisição — é um resultado válido do processamento, refletido em
+`Upload.status`/`error_message` (contrato completo em
+[api.md](api.md#post-apiv1uploadsidprocess)). Só a ausência do upload (ou
+pertencer a outro usuário) é `404`.
+
+---
+
+## Processamento de Uploads (Frontend)
+
+O botão "Processar" (Uploads e detalhe do upload) chama
+`useProcessUploadMutation`, que invalida a lista e o upload individual ao
+concluir. `useUploadQuery` faz *polling* (`refetchInterval`, 1,5s) enquanto
+`status === "processing"` — hoje a resposta já chega resolvida (processamento
+síncrono), então o polling nunca chega a repetir na prática, mas é o que
+deixa a página pronta para quando o backend passar a responder
+`"processing"` por mais tempo (fila real), sem nenhuma mudança de código no
+frontend.
+
+`UploadDetailPage` mostra início/fim/duração (`formatDuration`, calculada a
+partir de `started_at`/`finished_at`) e a mensagem de erro quando
+`status === "failed"` — nunca os dados extraídos (`OrderItem`), que ficam
+para a Sprint 5.
 
 ---
 
@@ -393,8 +500,15 @@ infraestrutura de persistência.
 
 - Cada usuário possuirá seu próprio workspace.
 - Todas as entidades principais serão vinculadas ao usuário autenticado —
-  `Upload` é a primeira entidade de negócio a seguir esse padrão
-  (`user_id` com `ondelete="CASCADE"`, mesmo relacionamento de `RefreshToken`).
+  `Upload` foi a primeira entidade de negócio a seguir esse padrão
+  (`user_id` com `ondelete="CASCADE"`, mesmo relacionamento de `RefreshToken`);
+  `OrderItem` (Sprint 4) segue o mesmo padrão, com `user_id` **e**
+  `upload_id` (ambos `ondelete="CASCADE"` — excluir um upload remove seus
+  itens; excluir o usuário remove tudo).
+- `OrderItem` reaproveita os enums `Marketplace`/`OrderStatus` do pacote
+  `etl` (`etl.types`) na coluna do model, em vez de duplicar os valores no
+  lado do backend — o mesmo `Marketplace` que o pipeline detecta é o que fica
+  gravado.
 - As migrations serão gerenciadas pelo Alembic.
 - A `Base` declarativa (`app/db/base.py`) define uma convenção de nomes
   explícita para índices e constraints, garantindo migrations reversíveis

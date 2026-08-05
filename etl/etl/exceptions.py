@@ -9,6 +9,15 @@ class ExtractionError(ETLError):
     """Falha ao ler ou interpretar o arquivo de origem."""
 
 
+class UnknownMarketplaceError(ExtractionError):
+    """Nenhum detector reconheceu os cabeçalhos do arquivo.
+
+    É uma `ExtractionError` (não uma classe irmã): a detecção acontece antes
+    de qualquer extração de dados ser possível — sem saber o marketplace,
+    não há como escolher o `Extractor`/`Transformer` corretos.
+    """
+
+
 class TransformationError(ETLError):
     """Falha ao padronizar os dados para o modelo canônico."""
 

@@ -17,8 +17,11 @@ if TYPE_CHECKING:
 class UploadStatus(StrEnum):
     """Estado de processamento de um upload.
 
-    Nesta sprint, todo upload nasce e permanece `UPLOADED` — os demais
-    valores existem para o motor ETL da Sprint 4, que passa a transicioná-los.
+    Todo upload nasce `UPLOADED`. `ETLProcessorService` (Sprint 4) transiciona
+    para `PROCESSING` ao iniciar, depois `PROCESSED`/`FAILED` ao concluir.
+    `QUEUED` permanece reservado: o processamento desta sprint é síncrono
+    (disparado por `POST /uploads/{id}/process`), sem fila real — ver ADR
+    correspondente em decisions.md.
     """
 
     UPLOADED = "uploaded"
@@ -29,12 +32,13 @@ class UploadStatus(StrEnum):
 
 
 class Upload(Base):
-    """Um arquivo enviado por um usuário, ainda não processado.
+    """Um arquivo enviado por um usuário.
 
     `original_filename` é só metadado de exibição — nunca usado para montar
     caminho em disco. `stored_filename` é gerado pelo `UploadService`
     (`uuid4().hex` + extensão validada), evitando colisão e *path traversal*
-    via nome de arquivo controlado pelo cliente.
+    via nome de arquivo controlado pelo cliente. `started_at`/`finished_at`
+    só são preenchidos quando o processamento ETL roda (Sprint 4).
     """
 
     __tablename__ = "uploads"
@@ -69,6 +73,8 @@ class Upload(Base):
         default=UploadStatus.UPLOADED,
     )
     error_message: Mapped[str | None] = mapped_column(String(1000), default=None)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

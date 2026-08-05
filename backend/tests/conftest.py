@@ -13,18 +13,19 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import get_upload_service
+from app.api.deps import get_etl_processor_service, get_upload_service
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import get_session
 from app.main import create_app
 
 # Importa os models para que `Base.metadata` os conheça antes do `create_all`.
-from app.models import RefreshToken, Upload, User  # noqa: F401
+from app.models import OrderItem, RefreshToken, Upload, User  # noqa: F401
+from app.services.etl_processor import ETLProcessorService
 from app.services.upload import UploadService
 from app.storage.local import LocalFileStorage
 
@@ -39,6 +40,18 @@ def engine() -> Iterator[Engine]:
         connect_args={"check_same_thread": False} if is_sqlite else {},
         poolclass=StaticPool if is_sqlite else None,
     )
+    if is_sqlite:
+        # O SQLite ignora `ON DELETE CASCADE` por padrão — a constraint fica
+        # só "de decoração" a menos que cada conexão ligue explicitamente o
+        # enforcement de FK. Sem isso, `test_deleting_an_upload_cascades_to_its_order_items`
+        # passaria contra PostgreSQL (que sempre aplica) e falharia aqui,
+        # mesmo com o `ondelete="CASCADE"` correto no model.
+        @event.listens_for(test_engine, "connect")
+        def _enable_sqlite_foreign_keys(dbapi_connection: object, _: object) -> None:
+            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     Base.metadata.create_all(test_engine)
     try:
         yield test_engine
@@ -85,8 +98,13 @@ def client(app: FastAPI, db_session: Session, upload_storage_dir: Path) -> Itera
             max_upload_size_bytes=settings.MAX_UPLOAD_SIZE_BYTES,
         )
 
+    def _override_get_etl_processor_service() -> ETLProcessorService:
+        storage = LocalFileStorage(upload_storage_dir)
+        return ETLProcessorService(session=db_session, storage=storage)
+
     app.dependency_overrides[get_session] = _override_get_session
     app.dependency_overrides[get_upload_service] = _override_get_upload_service
+    app.dependency_overrides[get_etl_processor_service] = _override_get_etl_processor_service
     try:
         with TestClient(app) as test_client:
             yield test_client

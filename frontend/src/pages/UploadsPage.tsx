@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { UploadsIcon } from '@/components/icons/Icons'
+import { PlayIcon, TrashIcon, UploadsIcon } from '@/components/icons/Icons'
 import { Dialog } from '@/components/ui/Dialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { FileUpload } from '@/components/ui/FileUpload'
@@ -12,10 +12,10 @@ import { Table, type SortDirection, type TableColumn } from '@/components/ui/Tab
 import { PageContainer } from '@/components/layout/PageContainer'
 import { Section } from '@/components/layout/Section'
 import { UploadStatusBadge } from '@/components/uploads/UploadStatusBadge'
-import { TrashIcon } from '@/components/icons/Icons'
 import {
   useCreateUploadMutation,
   useDeleteUploadMutation,
+  useProcessUploadMutation,
   useUploadsQuery,
 } from '@/hooks/useUploads'
 import { useToast } from '@/hooks/useToast'
@@ -93,13 +93,15 @@ function UploadQueueList({ items }: { items: QueueItem[] }) {
 /**
  * Fluxo completo de upload: drag & drop / seleção manual, progresso
  * simulado enquanto o backend responde, histórico com busca e ordenação, e
- * exclusão com confirmação. Nenhum dado de ETL — os arquivos só são
- * armazenados (ver docs/roadmap.md, Sprint 3).
+ * exclusão com confirmação. O botão "Processar" dispara o ETL manualmente
+ * (Sprint 4) — a página só mostra o status resultante, nunca os dados
+ * extraídos (isso fica para a Sprint 5).
  */
 export function UploadsPage() {
   const { data: uploads, isLoading } = useUploadsQuery()
   const createMutation = useCreateUploadMutation()
   const deleteMutation = useDeleteUploadMutation()
+  const processMutation = useProcessUploadMutation()
   const { showToast } = useToast()
 
   const [searchTerm, setSearchTerm] = useState('')
@@ -107,6 +109,7 @@ export function UploadsPage() {
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [uploadToDelete, setUploadToDelete] = useState<UploadRecord | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [processingId, setProcessingId] = useState<string | null>(null)
   const nextQueueId = useRef(0)
 
   function handleFilesSelected(files: File[]) {
@@ -194,6 +197,32 @@ export function UploadsPage() {
     }
   }
 
+  async function handleProcess(upload: UploadRecord): Promise<void> {
+    setProcessingId(upload.id)
+    try {
+      const result = await processMutation.mutateAsync(upload.id)
+      if (result.status === 'processed') {
+        showToast({
+          variant: 'success',
+          message: `${upload.originalFilename} processado com sucesso.`,
+        })
+      } else {
+        showToast({
+          variant: 'error',
+          message: result.errorMessage ?? `Falha ao processar ${upload.originalFilename}.`,
+        })
+      }
+    } catch (error) {
+      showToast({
+        variant: 'error',
+        message:
+          error instanceof ApiError ? error.message : 'Não foi possível processar o arquivo.',
+      })
+    } finally {
+      setProcessingId(null)
+    }
+  }
+
   const columns: TableColumn<UploadRecord>[] = [
     {
       key: 'name',
@@ -226,15 +255,28 @@ export function UploadsPage() {
       header: 'Ações',
       align: 'right',
       render: (row) => (
-        <IconButton
-          icon={<TrashIcon className="h-4 w-4" />}
-          aria-label={`Excluir ${row.originalFilename}`}
-          variant="ghost"
-          onClick={(event) => {
-            event.stopPropagation()
-            setUploadToDelete(row)
-          }}
-        />
+        <div className="flex justify-end gap-1">
+          <IconButton
+            icon={<PlayIcon className="h-4 w-4" />}
+            aria-label={`Processar ${row.originalFilename}`}
+            variant="ghost"
+            isLoading={processingId === row.id}
+            disabled={processingId === row.id || row.status === 'processing'}
+            onClick={(event) => {
+              event.stopPropagation()
+              void handleProcess(row)
+            }}
+          />
+          <IconButton
+            icon={<TrashIcon className="h-4 w-4" />}
+            aria-label={`Excluir ${row.originalFilename}`}
+            variant="ghost"
+            onClick={(event) => {
+              event.stopPropagation()
+              setUploadToDelete(row)
+            }}
+          />
+        </div>
       ),
     },
   ]

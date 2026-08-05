@@ -1,6 +1,6 @@
 # MarketPulse — API Reference
 
-Referência dos endpoints disponíveis após a Sprint 3 (File Import). A
+Referência dos endpoints disponíveis após a Sprint 4 (ETL Engine). A
 documentação interativa (Swagger) fica em `/docs` fora do ambiente de
 produção — ver [ADR-003](decisions.md#adr-003--health-fora-do-prefixo-versionado-da-api).
 
@@ -178,15 +178,14 @@ Retorna os dados do usuário autenticado. Requer
 
 ## Uploads
 
-Todos os endpoints exigem `Authorization: Bearer <access_token>`. Nenhum
-processamento acontece nesta sprint — os arquivos só são armazenados (ver
-[roadmap.md](roadmap.md), Sprint 3).
+Todos os endpoints exigem `Authorization: Bearer <access_token>`.
 
 ### `POST /api/v1/uploads`
 
 Envia um arquivo (`multipart/form-data`, campo `file`). Aceita apenas CSV e
 XLSX, validados por extensão **e** Content-Type; tamanho máximo configurável
-via `MAX_UPLOAD_SIZE_BYTES` (padrão 10 MiB).
+via `MAX_UPLOAD_SIZE_BYTES` (padrão 10 MiB). **Não processa o arquivo** —
+isso é feito por `POST /uploads/{id}/process`, abaixo.
 
 **Requisição:**
 
@@ -205,13 +204,17 @@ curl -X POST http://localhost:8000/api/v1/uploads \
   "file_size": 31,
   "mime_type": "text/csv",
   "status": "uploaded",
+  "error_message": null,
+  "started_at": null,
+  "finished_at": null,
   "uploaded_at": "2026-07-31T01:33:54.163129Z"
 }
 ```
 
-`status` é sempre `"uploaded"` nesta sprint — os demais valores
-(`queued`/`processing`/`processed`/`failed`) existem para o motor ETL da
-Sprint 4, que passa a transicioná-los.
+`status` nasce sempre `"uploaded"`. `queued` existe no enum mas não é usado
+nesta sprint — o processamento é síncrono, sem fila real (ver
+[decisions.md](decisions.md)). `error_message`/`started_at`/`finished_at`
+só são preenchidos depois de `POST /uploads/{id}/process`.
 
 **Erros:**
 
@@ -230,20 +233,7 @@ Lista os uploads do usuário autenticado, do mais recente para o mais antigo.
 Sem paginação nesta sprint (ver decisions.md) — busca e ordenação por outros
 critérios acontecem no cliente.
 
-**Resposta `200`:**
-
-```json
-[
-  {
-    "id": "1a165602-feb3-4001-8336-0fce06f8b59d",
-    "original_filename": "relatorio.csv",
-    "file_size": 31,
-    "mime_type": "text/csv",
-    "status": "uploaded",
-    "uploaded_at": "2026-07-31T01:33:54.163129Z"
-  }
-]
-```
+**Resposta `200`:** array no mesmo formato de `POST /uploads`.
 
 ---
 
@@ -260,9 +250,70 @@ Detalhes de um upload do usuário autenticado. Mesmo formato de resposta do
 
 ---
 
+### `POST /api/v1/uploads/{id}/process`
+
+Dispara o processamento ETL do upload: detecta o marketplace de origem,
+extrai, transforma e persiste os dados em `OrderItem`. **Síncrono nesta
+sprint** — a resposta só chega depois que o processamento termina, com
+`status` já resolvido para `processed` ou `failed`.
+
+**Requisição:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/uploads/1a165602-feb3-4001-8336-0fce06f8b59d/process \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Resposta `200` (sucesso):**
+
+```json
+{
+  "id": "1a165602-feb3-4001-8336-0fce06f8b59d",
+  "original_filename": "relatorio.csv",
+  "file_size": 31,
+  "mime_type": "text/csv",
+  "status": "processed",
+  "error_message": null,
+  "started_at": "2026-08-05T19:18:16.868523Z",
+  "finished_at": "2026-08-05T19:18:16.935008Z",
+  "uploaded_at": "2026-07-31T01:33:54.163129Z"
+}
+```
+
+**Resposta `200` (falha de processamento):** uma falha de processamento —
+marketplace não reconhecido, arquivo ilegível, dado inválido após a
+transformação — **não é um erro HTTP**. A requisição em si teve sucesso; o
+resultado é que o arquivo não pôde ser processado, refletido em `status` e
+`error_message`:
+
+```json
+{
+  "id": "1a165602-feb3-4001-8336-0fce06f8b59d",
+  "status": "failed",
+  "error_message": "Não foi possível identificar o marketplace de origem a partir dos cabeçalhos do arquivo. Verifique se o arquivo corresponde a um formato suportado (Shopee ou Mercado Livre).",
+  "started_at": "2026-08-05T19:18:32.342649Z",
+  "finished_at": "2026-08-05T19:18:32.352294Z",
+  "...": "..."
+}
+```
+
+Reprocessar um upload já `processed` (chamar de novo) é **idempotente**: os
+itens da tentativa anterior são substituídos, não duplicados.
+
+**Erros (de requisição, não de processamento):**
+
+| Status | Situação                                                    |
+| ------ | ---------------------------------------------------------------- |
+| `401`  | Sem token de acesso válido.                                       |
+| `404`  | Upload inexistente ou pertencente a outro usuário.                |
+
+---
+
 ### `DELETE /api/v1/uploads/{id}`
 
-Remove o arquivo em disco e o registro. **Resposta:** `204 No Content`.
+Remove o arquivo em disco e o registro — em cascata, remove também os
+`OrderItem` gerados por um processamento anterior. **Resposta:**
+`204 No Content`.
 
 **Erros:**
 

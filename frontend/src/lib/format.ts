@@ -25,3 +25,14 @@ export function formatDateTime(isoDate: string): string {
     timeStyle: 'short',
   }).format(new Date(isoDate))
 }
+
+/** Formata a duração entre duas datas ISO (`"2,3s"`, `"1min 04s"`). */
+export function formatDuration(startIsoDate: string, endIsoDate: string): string {
+  const totalSeconds = (new Date(endIsoDate).getTime() - new Date(startIsoDate).getTime()) / 1000
+  if (totalSeconds < 60) {
+    return `${totalSeconds.toFixed(1).replace('.', ',')}s`
+  }
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = Math.round(totalSeconds % 60)
+  return `${String(minutes)}min ${String(seconds).padStart(2, '0')}s`
+}

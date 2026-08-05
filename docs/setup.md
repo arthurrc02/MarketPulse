@@ -25,18 +25,23 @@ MarketPulse/
 │   │   ├── api/        # Routers (health, auth, users, uploads) e dependências HTTP
 │   │   ├── core/       # Settings, logging, security (JWT/bcrypt), erros de domínio
 │   │   ├── db/         # Engine, sessão e base declarativa
-│   │   ├── models/     # User, RefreshToken, Upload
+│   │   ├── models/     # User, RefreshToken, Upload, OrderItem
 │   │   ├── repositories/
 │   │   ├── schemas/    # Contratos Pydantic
-│   │   ├── services/   # AuthService, UploadService e demais regras de negócio
+│   │   ├── services/   # AuthService, UploadService, ETLProcessorService, OrderItemLoader
 │   │   └── storage/    # Abstração FileStorage + LocalFileStorage
-│   ├── migrations/     # Alembic (2 revisões: users+refresh_tokens, uploads)
+│   ├── migrations/     # Alembic (3 revisões: users+refresh_tokens, uploads, order_items)
 │   └── tests/
-├── etl/                # Motor ETL (apenas contratos até aqui)
+├── etl/                # Motor ETL — Extract → Transform → Validate → Load
 │   ├── etl/
-│   │   ├── extractors/
-│   │   ├── transformers/
-│   │   └── loaders/
+│   │   ├── detectors/     # Detecção de marketplace por cabeçalho (Shopee, Mercado Livre)
+│   │   ├── extractors/    # Leitura bruta (CSV/XLSX) por marketplace
+│   │   ├── transformers/  # Normalização (moeda, data, percentual, status) por marketplace
+│   │   ├── loaders/       # Contrato de persistência (implementação concreta no backend)
+│   │   ├── parsing.py     # FileSource, normalização de cabeçalho, leitura tabular
+│   │   ├── schema.py      # Esquema canônico + validação
+│   │   ├── components.py  # Registro marketplace → (Extractor, Transformer)
+│   │   └── pipeline.py    # ETLPipeline (orquestração)
 │   └── tests/
 ├── frontend/           # Aplicação React + TypeScript + Vite
 │   └── src/
@@ -158,6 +163,17 @@ docker compose up -d postgres
 TEST_DATABASE_URL=postgresql+psycopg://marketpulse:marketpulse@localhost:5432/marketpulse uv run pytest
 ```
 
+> **Cuidado:** a fixture de teste cria o schema do zero
+> (`Base.metadata.create_all`) e o derruba ao final de cada teste
+> (`drop_all`). Isso é seguro contra um serviço `postgres` do Compose dedicado
+> a testes — mas se `TEST_DATABASE_URL` apontar para o **mesmo** banco que
+> você usa via `docker compose exec backend alembic upgrade head` para testar
+> a API manualmente, a suíte apaga esse schema ao terminar (só
+> `alembic_version` sobra, já que essa tabela não faz parte de `Base.metadata`).
+> Se isso acontecer, `uv run alembic upgrade head` recria tudo — não há
+> necessidade de `downgrade` primeiro; um `DELETE FROM alembic_version` seguido
+> de `upgrade head` também resolve caso o Alembic ache que já está em `head`.
+
 ### Frontend
 
 ```bash
@@ -194,7 +210,9 @@ uv run alembic current
 
 > A primeira revisão (`867258180ae6`) cria as tabelas `users` e
 > `refresh_tokens`, geradas por autogenerate na Sprint 1. A segunda
-> (`420e360b0aa9`) cria a tabela `uploads` na Sprint 3.
+> (`420e360b0aa9`) cria a tabela `uploads` na Sprint 3. A terceira
+> (`0af8505c42c3`) adiciona `started_at`/`finished_at` em `uploads` e cria a
+> tabela `order_items` na Sprint 4.
 
 ---
 
@@ -239,10 +257,31 @@ curl -X POST http://localhost:8000/api/v1/uploads \
 O arquivo aparece em `storage/uploads/{user_id}/` na raiz do repositório
 (bind mount do Compose — ver [architecture.md](architecture.md)).
 
+Com o `id` retornado pelo upload, o processamento ETL pode ser disparado da
+mesma forma (Sprint 4):
+
+```bash
+curl -X POST http://localhost:8000/api/v1/uploads/<id>/process \
+  -H "Authorization: Bearer <access_token>"
+```
+
+A resposta traz `status: "processed"` (com um exemplo real de Shopee ou
+Mercado Livre — ver [decisions.md](decisions.md) sobre os dois formatos
+implementados nesta sprint) ou `status: "failed"` com `error_message`
+explicando o motivo (marketplace não reconhecido, arquivo ilegível, dado
+inválido). Um exemplo de arquivo Shopee reconhecível:
+
+```bash
+cat > relatorio.csv << 'EOF'
+ID do Pedido,SKU,Produto,Quantidade,Preco Unitario,Status,Data do Pedido
+1001,SKU-A,Camiseta Azul,2,"R$ 49,90",Concluido,05/08/2026
+EOF
+```
+
 O frontend em http://localhost:5173 deve exibir a tela de login; após
 cadastro/login, o dashboard real (sidebar, header e cards de exemplo) com
 "Bem-vindo ao MarketPulse." — a página de Uploads já tem o fluxo real
-(drag & drop, histórico, exclusão); navegue por Analytics, Insights e
+(drag & drop, histórico, exclusão, processamento); navegue por Analytics, Insights e
 Configurações pela barra lateral para ver os placeholders das próximas
 sprints.
 
@@ -337,3 +376,20 @@ minúscula) e, ao testar via `curl`, informe o tipo explicitamente com
 Confirme o valor de `MAX_UPLOAD_SIZE_BYTES` no `.env` — o padrão é 10 MiB
 (`10485760`). Após alterar, recrie o backend
 (`docker compose up -d --force-recreate backend`).
+
+**`POST /uploads/{id}/process` sempre retorna `status: "failed"` com "não foi possível identificar o marketplace"**
+O arquivo não tem os cabeçalhos exigidos pelos dois formatos de exemplo
+implementados nesta sprint (Shopee ou Mercado Livre — ver
+[decisions.md](decisions.md)). A detecção compara o **conjunto de nomes de
+coluna**, não posição nem valores; confira se o cabeçalho da primeira linha
+bate exatamente com o esperado (`etl/detectors/shopee.py` ou
+`etl/detectors/mercado_livre.py` listam as colunas exigidas). Isso é o
+comportamento esperado para qualquer outro formato — Amazon, Magalu ou uma
+planilha própria — já que só esses dois têm detector implementado.
+
+**Processar um upload não muda nada visível na UI além do status**
+Esperado nesta sprint: a página de Uploads e o detalhe do upload mostram
+apenas status, início/fim/duração e erro — nunca os itens extraídos
+(`OrderItem`). Consultar os dados processados por ora só é possível
+diretamente no banco (`SELECT * FROM order_items`); a Sprint 5 (Analytics
+Dashboard) é quem expõe esses dados na interface.
