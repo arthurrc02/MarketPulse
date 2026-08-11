@@ -50,7 +50,8 @@ ETL Engine (Pandas)
 - React Query
 - Tailwind CSS 4
 - Framer Motion
-- Recharts (Sprint 5)
+- Recharts 3 (gráficos do Dashboard de Analytics, Sprint 5 — v3, não v2 como
+  originalmente previsto, por compatibilidade oficial com React 19)
 
 ### ETL
 
@@ -258,8 +259,9 @@ Os componentes deverão ser reutilizáveis sempre que possível.
 | Components | `src/components/ui/`      | Design System: primitivos reutilizáveis (ver [design-system.md](design-system.md)). |
 | Components | `src/components/layout/`  | `AppLayout`, `Sidebar`, `Header`, `PageContainer`, `Section`, `AuthLayout`. |
 | Components | `src/components/icons/`   | Catálogo único de ícones SVG (`Icons.tsx`).                         |
-| Hooks      | `src/hooks/`              | `useAuth`, `useToast`, `useUploads` (React Query — primeiro uso real, ver abaixo). |
-| Lib        | `src/lib/`                | `apiClient`, `auth/api`, `uploads/api`, `auth/tokenStore`, `format`, QueryClient, `env`. |
+| Components | `src/components/analytics/` | `AnalyticsFilters`, `RevenueChart`, `OrdersChart`, `OrderStatusChart`, `TopProductsTable` (Sprint 5). |
+| Hooks      | `src/hooks/`              | `useAuth`, `useToast`, `useUploads`, `useAnalytics` (React Query).  |
+| Lib        | `src/lib/`                | `apiClient`, `auth/api`, `uploads/api`, `analytics/api`, `auth/tokenStore`, `format`, QueryClient, `env`. |
 | Styles     | `src/styles/`             | Tokens e camadas base do Tailwind (ver design-system.md).           |
 | Test       | `src/test/`               | Setup do Vitest e `renderWithProviders` (helper de testes).         |
 
@@ -491,8 +493,89 @@ frontend.
 
 `UploadDetailPage` mostra início/fim/duração (`formatDuration`, calculada a
 partir de `started_at`/`finished_at`) e a mensagem de erro quando
-`status === "failed"` — nunca os dados extraídos (`OrderItem`), que ficam
-para a Sprint 5.
+`status === "failed"` — nunca os dados extraídos (`OrderItem`) em si; a
+visão agregada desses dados é o Dashboard de Analytics (abaixo).
+
+---
+
+## Analytics (Backend)
+
+```text
+Router (routes/analytics.py)
+        │
+        ▼
+AnalyticsService  — valida filtro (from <= to), converte centavos → reais
+        │
+        ▼
+AnalyticsRepository  — só SELECT agregado (SUM/COUNT DISTINCT/GROUP BY)
+        │
+        ▼
+PostgreSQL  (OrderItem, sempre WHERE user_id = :usuário_autenticado)
+```
+
+| Peça                  | Arquivo                          | Papel                                                                 |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------ |
+| `routes/analytics.py`  | `app/api/routes/analytics.py`      | Quatro endpoints (`overview`, `sales-over-time`, `orders-by-status`, `top-products`); só parsing de query params, nenhuma regra de negócio. |
+| `AnalyticsService`     | `app/services/analytics.py`        | Valida o período, monta `AnalyticsFilters`, converte centavos (`int`) em reais (`float`) — só nesta borda, nunca nos cálculos. |
+| `AnalyticsRepository`  | `app/repositories/analytics.py`    | Toda agregação em SQL; nenhum `OrderItem` é carregado linha a linha para o Python somar. |
+
+**KPIs e o que cada um mede** (contrato completo com exemplos em
+[api.md](api.md#analytics)): `revenue` (soma de `total_price_cents` dos itens
+`completed`), `orders` (`COUNT(DISTINCT external_order_id)` — nunca a
+contagem de `OrderItem`, que é por item, não por pedido), `average_order_value`
+(`revenue / orders`, `0` se não houver pedidos), `active_products`
+(`COUNT(DISTINCT sku)`). Todos os quatro — e `sales-over-time` e
+`top-products` — consideram **somente** `status = completed`; só
+`orders-by-status` mostra a distribuição entre todos os status, de propósito
+(ver [ADR-062](decisions.md#adr-062--kpis-de-analytics-consideram-somente-orderitem-com-status-completed)).
+
+**Filtros:** `from`/`to` (data) e `marketplace`, opcionais e combináveis,
+aplicados como `WHERE` adicionais em `AnalyticsRepository._conditions`. Sem
+filtro, considera todo o histórico do usuário. `AnalyticsService` rejeita
+`from > to` com `422` antes de qualquer consulta.
+
+**Isolamento por usuário:** todo método de `AnalyticsRepository` recebe
+`user_id` explicitamente e o usa como primeira condição do `WHERE` — o valor
+vem sempre de `CurrentUserDep` (o token), nunca de um parâmetro do cliente.
+
+**`has_data`:** calculado por uma consulta `EXISTS` separada, ignorando
+filtro e status — permite ao frontend diferenciar "usuário nunca importou
+nada" (mostra o EmptyState de onboarding) de "o filtro atual não bateu com
+nada" (mostra KPIs zerados de verdade) — ver
+[ADR-063](decisions.md#adr-063--campo-has_data-para-distinguir-sem-dados-de-filtro-sem-resultado).
+
+---
+
+## Analytics (Frontend)
+
+```text
+DashboardPage
+   ├── useOverviewQuery(filters)              → GET /analytics/overview
+   │      ├── isError            → mensagem de erro + "Tentar novamente"
+   │      ├── isSuccess && !hasData → EmptyState (ir para /app/uploads)
+   │      └── isSuccess && hasData  → KPICards + gráficos + tabela
+   ├── AnalyticsFilters (período + marketplace) → atualiza `filters` (state)
+   ├── useSalesOverTimeQuery(filters)          → RevenueChart + OrdersChart
+   ├── useOrdersByStatusQuery(filters)         → OrderStatusChart
+   └── useTopProductsQuery(filters, limit)     → TopProductsTable
+```
+
+Trocar um filtro atualiza o `state` de `DashboardPage`; como `filters` entra
+na `queryKey` de cada hook, o React Query refaz a busca sozinho — nenhum
+dado já carregado é refiltrado no cliente.
+
+| Peça                  | Arquivo                                  | Papel                                                              |
+| ---------------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
+| `lib/analytics/api`    | `src/lib/analytics/api.ts`                | Chamadas HTTP tipadas (camelCase); monta a query string dos filtros. |
+| `useAnalytics`         | `src/hooks/useAnalytics.ts`               | `useOverviewQuery`, `useSalesOverTimeQuery`, `useOrdersByStatusQuery`, `useTopProductsQuery`. |
+| `components/analytics/` | `AnalyticsFilters`, `RevenueChart`, `OrdersChart`, `OrderStatusChart`, `TopProductsTable` | Componentes novos do Design System — reaproveitam `Card`/`Table`/`Skeleton`/`EmptyState` já existentes; cores dos gráficos vêm dos tokens já definidos (`--color-primary`, `--color-emerald-*`, `--color-danger`), nenhuma cor nova. |
+
+Três estados tratados explicitamente (não apenas "carregando" vs.
+"carregado"): **erro** (mensagem específica + retry, nunca um "—" silencioso
+— requisito explícito da sprint), **sem dados** (`EmptyState` completo, com
+ação para `/app/uploads`, só quando `has_data` é `false`) e **filtro sem
+resultado** (KPIs zerados de verdade, sem esconder os filtros — `has_data`
+continua `true`).
 
 ---
 

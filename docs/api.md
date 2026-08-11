@@ -1,6 +1,6 @@
 # MarketPulse — API Reference
 
-Referência dos endpoints disponíveis após a Sprint 4 (ETL Engine). A
+Referência dos endpoints disponíveis após a Sprint 5 (Analytics Dashboard). A
 documentação interativa (Swagger) fica em `/docs` fora do ambiente de
 produção — ver [ADR-003](decisions.md#adr-003--health-fora-do-prefixo-versionado-da-api).
 
@@ -320,6 +320,135 @@ Remove o arquivo em disco e o registro — em cascata, remove também os
 | Status | Situação                                                    |
 | ------ | ---------------------------------------------------------------- |
 | `404`  | Upload inexistente ou pertencente a outro usuário.                |
+
+---
+
+## Analytics
+
+Todos os endpoints exigem `Authorization: Bearer <access_token>` e
+respondem apenas com dados do usuário autenticado — o `user_id` nunca vem
+do cliente. Todos aceitam os mesmos três filtros opcionais via query string:
+
+| Parâmetro     | Tipo                                             | Descrição                            |
+| ------------- | ------------------------------------------------- | ------------------------------------- |
+| `from`        | data ISO (`aaaa-mm-dd`)                            | Início do período (inclusivo).        |
+| `to`          | data ISO (`aaaa-mm-dd`)                            | Fim do período (inclusivo).           |
+| `marketplace` | `shopee` \| `mercado_livre` \| `amazon` \| `magalu` | Filtra por marketplace de origem.     |
+
+Sem `from`/`to`, considera todo o histórico do usuário. `from` posterior a
+`to` responde `422`. Um `marketplace` fora do enum responde `422`
+automaticamente (validação do Pydantic).
+
+**"Pedido" em qualquer resposta abaixo é sempre `COUNT(DISTINCT
+external_order_id)`, nunca a contagem de `OrderItem`** — um pedido com três
+produtos gera três `OrderItem`, mas conta como um pedido só. Exceto em
+`orders-by-status`, todo endpoint considera **apenas** `OrderItem` com
+`status = "completed"` — ver
+[ADR-062](decisions.md#adr-062--kpis-de-analytics-consideram-somente-orderitem-com-status-completed).
+
+### `GET /api/v1/analytics/overview`
+
+Os quatro KPIs principais do Dashboard.
+
+**Requisição:**
+
+```bash
+curl "http://localhost:8000/api/v1/analytics/overview?from=2026-07-01&to=2026-07-31&marketplace=shopee" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Resposta `200`:**
+
+```json
+{
+  "revenue": 10697.0,
+  "orders": 63,
+  "average_order_value": 169.79,
+  "active_products": 5,
+  "has_data": true
+}
+```
+
+| Campo                 | Cálculo                                                                 |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `revenue`              | Soma de `total_price_cents / 100` dos itens `completed`.                 |
+| `orders`                | Pedidos distintos `completed`.                                           |
+| `average_order_value`   | `revenue / orders`; `0` se `orders` for `0` (nunca divide por zero).     |
+| `active_products`       | SKUs distintos entre os itens `completed`.                               |
+| `has_data`               | `true` se o usuário tem **qualquer** `OrderItem`, ignorando filtro e status — distingue "nunca importei nada" de "esse filtro não bateu com nada" (ver [ADR-063](decisions.md#adr-063--campo-has_data-para-distinguir-sem-dados-de-filtro-sem-resultado)). |
+
+---
+
+### `GET /api/v1/analytics/sales-over-time`
+
+Faturamento e pedidos `completed`, agregados por dia — a agregação acontece
+inteiramente no PostgreSQL (`GROUP BY order_date`); nenhum `OrderItem` é
+enviado ao cliente para ele calcular.
+
+**Resposta `200`:**
+
+```json
+[
+  { "date": "2026-07-13", "revenue": 1344.0, "orders": 8 },
+  { "date": "2026-07-14", "revenue": 939.0, "orders": 6 }
+]
+```
+
+Dias sem nenhum item `completed` simplesmente não aparecem na lista (não são
+preenchidos com zero).
+
+---
+
+### `GET /api/v1/analytics/orders-by-status`
+
+Distribuição de pedidos entre **todos** os status canônicos — o único
+endpoint de Analytics que não filtra por `completed` (é o próprio propósito
+dele). Assume um status por pedido (todos os itens de um mesmo pedido
+compartilham o status) — ver
+[ADR-064](decisions.md#adr-064--orders-by-status-assume-um-status-por-pedido).
+
+**Resposta `200`:**
+
+```json
+[
+  { "status": "completed", "count": 63, "percentage": 26.4 },
+  { "status": "cancelled", "count": 77, "percentage": 32.2 },
+  { "status": "pending", "count": 83, "percentage": 34.7 },
+  { "status": "unknown", "count": 16, "percentage": 6.7 }
+]
+```
+
+Só aparecem status com pelo menos um pedido; `refunded` não aparece na
+resposta acima porque não houve nenhum.
+
+---
+
+### `GET /api/v1/analytics/top-products`
+
+Produtos com maior faturamento, já ordenados e limitados pelo backend.
+
+**Parâmetro adicional:** `limit` (padrão `10`, mínimo `1`, máximo `50`).
+
+**Resposta `200`:**
+
+```json
+[
+  {
+    "product_name": "1Banqueta alta com encosto. suporta até 200Kg",
+    "sku": "AUTO-1BANQUETAALTACOMENCOSTOSUPORTAATE200KG",
+    "quantity": 49,
+    "revenue": 8137.0,
+    "orders": 49
+  }
+]
+```
+
+**Erros comuns aos quatro endpoints:**
+
+| Status | Situação                                              |
+| ------ | -------------------------------------------------------- |
+| `401`  | Sem token de acesso válido.                               |
+| `422`  | `from` posterior a `to`, `marketplace` inválido, ou `limit` fora de 1–50 (só `top-products`). |
 
 ---
 

@@ -1739,3 +1739,107 @@ SKUs derivados diferentes mesmo sendo o "mesmo" produto na prática. Aceitável
 para esta sprint (nenhuma tela exibe SKU ainda); se a Sprint 5 precisar de
 um catálogo de produtos mais preciso, uma correspondência aproximada
 (fuzzy matching) de nomes fica registrada como melhoria futura.
+
+---
+
+## ADR-062 — KPIs de Analytics consideram somente `OrderItem` com `status = completed`
+
+**Sprint:** 5 · **Status:** Aceita
+
+**Contexto.** O enunciado da sprint definia "Faturamento" como "soma de
+`total_price_cents`", sem qualificar por status — mas o dataset real
+(`orders.xlsx`, ver Hotfix 4.2) tem 32% dos itens `cancelled`. Um pedido
+cancelado tem um `total_price_cents` gravado (o valor que *seria* cobrado),
+mas nunca foi, de fato, faturamento. Somar todos os status indistintamente
+infla "Faturamento" e "Ticket médio" com receita que nunca existiu — uma
+decisão com impacto grande o bastante no significado dos números para não
+ser tomada silenciosamente (por isso foi levada ao usuário antes de
+implementar, conforme pedido explícito da sprint para decisões ambíguas).
+
+**Decisão.** `revenue`, `orders`, `average_order_value`, `active_products`,
+`sales-over-time` e `top-products` consideram **apenas** `OrderItem` com
+`status = "completed"`. `orders-by-status` é a exceção deliberada — mostra a
+distribuição entre todos os status, já que é o próprio propósito do
+endpoint.
+
+**Alternativas descartadas** (apresentadas ao usuário, que escolheu esta):
+
+- _Somar todos os status_: mais simples e mais literal ao enunciado, mas
+  conta como "faturamento" pedidos que nunca foram pagos.
+- _Excluir só `cancelled` (contar `completed` + `pending` + `unknown`)_:
+  meio-termo — não penaliza vendas ainda em andamento, mas mistura receita
+  confirmada com receita ainda incerta num único número chamado
+  "Faturamento".
+
+**Consequências.** No dataset real, "Faturamento" reflete só os 63 pedidos
+`completed` (R$ 10.697,00), não os 239 itens totais — um número menor, porém
+correto. Qualquer novo indicador de faturamento adicionado no futuro deve
+seguir a mesma regra por padrão, a menos que o próprio indicador seja,
+explicitamente, sobre outro recorte (como `orders-by-status`).
+
+---
+
+## ADR-063 — Campo `has_data` para distinguir "sem dados" de "filtro sem resultado"
+
+**Sprint:** 5 · **Status:** Aceita
+
+**Contexto.** A sprint pede duas coisas que parecem, à primeira vista, o
+mesmo estado: "usuário sem dados recebe EmptyState" e "confirmar que os
+dados continuam isolados por usuário" (que pode legitimamente resultar em
+`revenue: 0` para um filtro específico, mesmo com dados existindo). Usar só
+`orders === 0` para decidir "mostrar o EmptyState de onboarding" esconderia
+os filtros e a tela inteira sempre que um filtro de período não desse
+resultado — mesmo para um usuário com histórico robusto.
+
+**Decisão.** `AnalyticsOverview.has_data` é calculado por uma consulta
+`EXISTS` separada, restrita só a `user_id` (ignora período, marketplace e
+status). O frontend usa exclusivamente esse campo para decidir entre o
+EmptyState completo (nunca importou nada — esconde até os filtros) e KPIs
+zerados de verdade (tem dados, mas não para o filtro atual — filtros
+continuam visíveis).
+
+**Alternativas descartadas.**
+
+- _Inferir "sem dados" de `orders === 0`_: mais barato (sem consulta extra),
+  mas indistinguível de "filtro não bateu com nada" — o EmptyState de
+  onboarding ("importe um relatório") apareceria erroneamente para um
+  usuário que só mudou o período.
+
+**Consequências.** Uma consulta `EXISTS` a mais por chamada de `overview`
+(rápida — `LIMIT 1` sobre um índice já existente em `user_id`). O frontend
+(`DashboardPage`) usa só esse campo para a decisão binária "EmptyState de
+onboarding vs. Dashboard normal" — não precisa fazer uma segunda chamada sem
+filtro para descobrir a mesma coisa.
+
+---
+
+## ADR-064 — `orders-by-status` assume um status por pedido
+
+**Sprint:** 5 · **Status:** Aceita
+
+**Contexto.** `status` é uma coluna de `OrderItem` (por item), não de um
+`Order` separado (a Sprint 4 decidiu deliberadamente não ter essa entidade —
+ver ADR correspondente). Um pedido com dois itens poderia, em teoria, ter
+itens com status diferentes entre si. `orders-by-status` responde `COUNT
+(DISTINCT external_order_id) GROUP BY status` — se um pedido realmente
+tivesse itens em dois status, ele seria contado uma vez em **cada** grupo,
+inflando o total.
+
+**Decisão.** Aceitar essa limitação conscientemente: no dataset real
+(`orders.xlsx`) e no formato de exemplo, cada pedido tem exatamente um
+status (verificado: 239 pedidos, 239 itens, nenhuma divergência). Não foi
+implementada nenhuma lógica de "status dominante" ou desambiguação.
+
+**Alternativas descartadas.**
+
+- _Escolher um status "representativo" por pedido_ (ex.: o mais
+  recente, ou uma ordem de prioridade entre status): resolveria o caso
+  hipotético, mas adiciona uma regra de negócio nova sem nenhum dado real
+  que a exija — desproporcional ao escopo desta sprint.
+
+**Consequências.** Documentado aqui e no docstring de
+`AnalyticsRepository.orders_by_status` para não ser "redescoberto" como bug
+se um marketplace futuro realmente produzir pedidos multi-status. Se isso
+acontecer, o soma de `count` em `orders-by-status` pode superar `orders` do
+`overview` — um sinal de alerta a verificar antes de confiar cegamente no
+total.

@@ -85,3 +85,10 @@ class UploadNotFoundError(AppError):
 
     status_code = status.HTTP_404_NOT_FOUND
     detail = "Upload não encontrado."
+
+
+class InvalidAnalyticsFilterError(AppError):
+    """Filtro de período inválido (`from` posterior a `to`) em um endpoint de Analytics."""
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    detail = "Filtro de período inválido."

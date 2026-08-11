@@ -26,6 +26,17 @@ export function formatDateTime(isoDate: string): string {
   }).format(new Date(isoDate))
 }
 
+/** Formata um valor monetário em reais (`"R$ 1.234,56"`). */
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount)
+}
+
+/** Formata uma data ISO (`"aaaa-mm-dd"`) no padrão `dd/mm/aaaa`, sem componente de hora. */
+export function formatDateOnly(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-')
+  return `${day ?? '?'}/${month ?? '?'}/${year ?? '?'}`
+}
+
 /** Formata a duração entre duas datas ISO (`"2,3s"`, `"1min 04s"`). */
 export function formatDuration(startIsoDate: string, endIsoDate: string): string {
   const totalSeconds = (new Date(endIsoDate).getTime() - new Date(startIsoDate).getTime()) / 1000

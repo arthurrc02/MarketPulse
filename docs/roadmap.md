@@ -7,8 +7,8 @@
 | 2      | Design System & Frontend Foundation | ✅ Concluída |
 | 3      | File Import                         | ✅ Concluída |
 | 4      | ETL Engine                          | ✅ Concluída |
-| 5      | Analytics Dashboard                 | ⏳ Próxima   |
-| 6      | Business Insights                   | ⬜ Planejada |
+| 5      | Analytics Dashboard                 | ✅ Concluída |
+| 6      | Business Insights                   | ⏳ Próxima   |
 | 7      | Release Candidate                   | ⬜ Planejada |
 
 ---
@@ -273,20 +273,58 @@ insights, OCR, IA.
 
 ---
 
-## Sprint 5 — Analytics Dashboard ⏳
+## Sprint 5 — Analytics Dashboard ✅
 
-**Objetivo:** indicadores e gráficos.
+**Objetivo:** transformar os `OrderItem` persistidos (Sprint 4) em métricas
+reais e substituir os KPIs placeholder do Dashboard por dados de verdade.
 
-**Escopo previsto:**
+**Entregue:**
 
-- Endpoints de métricas: faturamento, ticket médio, pedidos, produtos mais
-  vendidos, desempenho por marketplace, evolução temporal e categorias.
-- Dashboard com KPI Cards e gráficos (Recharts).
-- Filtros por período, marketplace e categoria.
+- Camada de Analytics em camadas (`AnalyticsRepository` → `AnalyticsService`
+  → `routes/analytics.py`), toda consulta agregada no PostgreSQL (`SUM`,
+  `COUNT DISTINCT`, `GROUP BY`) — nenhum `OrderItem` é carregado linha a
+  linha para o Python somar.
+- Quatro endpoints: `GET /api/v1/analytics/{overview,sales-over-time,
+  orders-by-status,top-products}`, todos exigindo autenticação e filtrando
+  por `user_id` do token — nunca aceito do cliente. Filtros opcionais de
+  período (`from`/`to`) e `marketplace` em todos; `top-products` também
+  aceita `limit` (padrão 10, máximo 50, controlado pelo backend).
+- KPIs (faturamento, pedidos, ticket médio, produtos ativos) calculados
+  apenas sobre `OrderItem` com `status = completed` — ver
+  [ADR-062](decisions.md#adr-062--kpis-de-analytics-consideram-somente-orderitem-com-status-completed).
+  "Pedido" é sempre `COUNT(DISTINCT external_order_id)`, nunca a contagem de
+  itens.
+- `orders-by-status` é a exceção deliberada: mostra a distribuição entre
+  **todos** os status, não só `completed` — é o próprio propósito do
+  endpoint.
+- Campo `has_data` no `overview`, calculado à parte dos filtros, para o
+  frontend diferenciar "nunca importei nada" de "meu filtro não bateu com
+  nada" — ver [ADR-063](decisions.md#adr-063--campo-has_data-para-distinguir-sem-dados-de-filtro-sem-resultado).
+- Frontend: Dashboard real com quatro `KPICard`, dois gráficos de série
+  temporal (faturamento e pedidos por dia), um gráfico de pizza (pedidos por
+  status) e uma tabela de top produtos — todos via Recharts 3 (React Query
+  refaz a busca a cada mudança de filtro, nunca refiltra em memória).
+  Estados de carregamento (skeleton), erro (mensagem + "Tentar novamente",
+  nunca um "—" silencioso) e vazio (`EmptyState` com atalho para
+  `/app/uploads`) tratados separadamente.
+- Novos componentes no Design System (`components/analytics/`):
+  `AnalyticsFilters`, `RevenueChart`, `OrdersChart`, `OrderStatusChart`,
+  `TopProductsTable` — reaproveitam `Card`, `Table`, `Skeleton`,
+  `EmptyState` já existentes; nenhuma cor nova fora dos tokens já definidos.
+- 20 testes novos de backend (fixtures determinísticas + integração com o
+  `orders.xlsx` real) e 18 de frontend (KPIs, loading, erro, filtros,
+  EmptyState, gráficos, tabela) — 182 testes de backend/etl e 154 de
+  frontend no total.
+
+**Fora de escopo (por decisão, fica para sprints futuras):** desempenho por
+marketplace como indicador dedicado (o filtro de marketplace já cobre o caso
+de uso principal), categorias de produto (não existe esse dado no modelo
+atual), previsão de vendas, recomendação, edição manual dos dados
+importados, fila assíncrona, insights automáticos (Sprint 6).
 
 ---
 
-## Sprint 6 — Business Insights ⬜
+## Sprint 6 — Business Insights ⏳
 
 **Objetivo:** observações automáticas baseadas em regras de negócio.
 

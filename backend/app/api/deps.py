@@ -11,6 +11,7 @@ from app.core.errors import InvalidTokenError
 from app.core.security import TokenDecodeError, decode_access_token
 from app.db.session import get_session
 from app.models.user import User
+from app.services.analytics import AnalyticsService
 from app.services.auth import AuthService
 from app.services.etl_processor import ETLProcessorService
 from app.services.health import HealthService
@@ -84,3 +85,11 @@ def get_etl_processor_service(session: SessionDep, settings: SettingsDep) -> ETL
 
 
 ETLProcessorServiceDep = Annotated[ETLProcessorService, Depends(get_etl_processor_service)]
+
+
+def get_analytics_service(session: SessionDep) -> AnalyticsService:
+    """Injeta o serviço de Analytics. Sem storage — só leitura agregada do banco."""
+    return AnalyticsService(session)
+
+
+AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
