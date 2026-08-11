@@ -110,7 +110,13 @@ describe('DashboardPage', () => {
 
   it('shows the onboarding empty state when the user never imported anything', async () => {
     mockedApi.getOverview.mockResolvedValue(
-      makeOverview({ hasData: false, revenue: 0, orders: 0, averageOrderValue: 0, activeProducts: 0 }),
+      makeOverview({
+        hasData: false,
+        revenue: 0,
+        orders: 0,
+        averageOrderValue: 0,
+        activeProducts: 0,
+      }),
     )
     const user = userEvent.setup()
 
@@ -126,7 +132,13 @@ describe('DashboardPage', () => {
 
   it('shows real zero KPIs (not the onboarding empty state) when a filter matches no data', async () => {
     mockedApi.getOverview.mockResolvedValue(
-      makeOverview({ hasData: true, revenue: 0, orders: 0, averageOrderValue: 0, activeProducts: 0 }),
+      makeOverview({
+        hasData: true,
+        revenue: 0,
+        orders: 0,
+        averageOrderValue: 0,
+        activeProducts: 0,
+      }),
     )
 
     renderDashboard()
