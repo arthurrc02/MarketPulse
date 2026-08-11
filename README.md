@@ -9,13 +9,14 @@ negócio. O MarketPulse importa arquivos CSV e Excel de **Shopee, Mercado Livre,
 Amazon e Magalu**, padroniza tudo em um único modelo de dados e apresenta
 indicadores, gráficos e insights automáticos em um dashboard moderno.
 
-> **Status:** Sprint 4 (ETL Engine) concluída. Além do upload (Sprint 3),
-> usuários já conseguem processar seus arquivos: o motor ETL detecta o
-> marketplace de origem automaticamente (dois formatos de exemplo — Shopee e
-> Mercado Livre, arquitetura pronta para os demais), normaliza os dados
-> (moeda, data, percentual) e persiste os itens padronizados. Nenhum
-> dashboard, gráfico ou insight sobre esses dados existe ainda — começam na
-> Sprint 5 em diante.
+> **Status:** Sprint 5 (Analytics Dashboard) concluída. Os dados processados
+> pelo ETL (Sprint 4) agora viram indicadores reais: faturamento, pedidos,
+> ticket médio, produtos ativos, evolução de vendas, distribuição por status
+> e top produtos, todos calculados no PostgreSQL e filtráveis por período e
+> marketplace. O Dashboard deixou de ser placeholder — KPI Cards e gráficos
+> (Recharts) mostram dados de verdade, com estados de carregamento, erro e
+> vazio tratados explicitamente. Insights automáticos baseados em regras de
+> negócio começam na Sprint 6.
 
 ---
 
@@ -24,7 +25,7 @@ indicadores, gráficos e insights automáticos em um dashboard moderno.
 | Camada             | Tecnologias                                                                 |
 | ------------------ | --------------------------------------------------------------------------- |
 | **Backend**        | Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · Pydantic v2 · PostgreSQL 16 · PyJWT · bcrypt |
-| **Frontend**       | React 19 · TypeScript · Vite · Tailwind CSS 4 · React Router · React Query · Framer Motion |
+| **Frontend**       | React 19 · TypeScript · Vite · Tailwind CSS 4 · React Router · React Query · Framer Motion · Recharts 3 |
 | **ETL**            | Pandas · OpenPyXL                                                           |
 | **Infraestrutura** | Docker · Docker Compose · GitHub Actions                                     |
 | **Qualidade**      | Ruff · MyPy (strict) · Pytest · ESLint · Prettier · Vitest                   |
@@ -63,7 +64,7 @@ estão em **[docs/setup.md](docs/setup.md)**; os endpoints disponíveis em
 ```text
 backend/     API FastAPI em camadas (api → services → repositories → db)
 etl/         Motor ETL (extractors, transformers, loaders)
-frontend/    React + TypeScript — auth completa, Design System, uploads e navegação
+frontend/    React + TypeScript — auth, Design System, uploads e Analytics Dashboard
 storage/     Arquivos enviados via upload (bind mount, fora do Git)
 docker/      Dockerfiles e configuração do Nginx
 docs/        Documentação do projeto
@@ -116,6 +117,6 @@ somadas ao build das imagens Docker de produção.
 | 2      | Design System & Frontend Foundation | ✅ Concluída |
 | 3      | File Import                         | ✅ Concluída |
 | 4      | ETL Engine                          | ✅ Concluída |
-| 5      | Analytics Dashboard                 | ⏳ Próxima   |
-| 6      | Business Insights                   | ⬜ Planejada |
+| 5      | Analytics Dashboard                 | ✅ Concluída |
+| 6      | Business Insights                   | ⏳ Próxima   |
 | 7      | Release Candidate                   | ⬜ Planejada |
