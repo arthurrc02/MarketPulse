@@ -7,13 +7,50 @@ transformer reimplementar (e arriscar divergir de) o mesmo parsing.
 """
 
 import datetime
+from collections.abc import Iterable
 from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 
+from etl.detectors.signature import signature_key
 from etl.exceptions import TransformationError
+from etl.parsing import normalize_column_name
 from etl.schema import CANONICAL_COLUMNS
 from etl.types import OrderStatus
+
+
+def find_column(columns: Iterable[str], *readable_aliases: str) -> str | None:
+    """Primeira coluna (já normalizada por `read_tabular_file`) que corresponde
+    a uma das grafias aceitas — `None` se nenhuma existir.
+
+    Mesma estratégia de aliases do hotfix da detecção (Sprint 4.1,
+    `etl.detectors.signature.concept`), aplicada aqui à escolha de qual
+    coluna ler para um campo, não a "este arquivo é deste marketplace?". Um
+    transformer passa `readable_aliases` em texto legível (`"Nome do
+    Produto"`); a normalização (`etl.parsing.normalize_column_name` — a
+    mesma que já produziu `columns`) acontece aqui.
+    """
+    available = set(columns)
+    for alias in readable_aliases:
+        candidate = normalize_column_name(alias)
+        if candidate in available:
+            return candidate
+    return None
+
+
+def derive_sku_from_product_name(product_name: str) -> str:
+    """Gera um SKU determinístico quando o arquivo não informa nenhum.
+
+    Alguns relatórios reais chegam com as colunas de SKU em branco — o
+    vendedor nunca preencheu a referência (caso observado no relatório
+    oficial da Shopee, ver ADR-061 em decisions.md). Em vez de rejeitar a
+    linha ou gerar um identificador aleatório (que impediria agrupar o
+    mesmo produto entre pedidos diferentes na Sprint 5), deriva-se um SKU
+    estável a partir do nome do produto — mesmo produto, mesmo SKU
+    derivado — prefixado para deixar claro que não veio do arquivo.
+    """
+    slug = signature_key(product_name).upper()[:60]
+    return f"AUTO-{slug}" if slug else "AUTO-PRODUTO-SEM-NOME"
 
 
 def parse_identifier(value: object) -> str:
@@ -37,14 +74,19 @@ def parse_text(value: object) -> str:
 
 
 def parse_brl_currency_to_cents(value: object) -> int:
-    """`"R$ 1.234,56"` → `123456` (centavos).
+    """`"R$ 1.234,56"` → `123456` (centavos). Também aceita `"145.00"` (sem
+    símbolo, ponto decimal — formato de exportações como a da Shopee, ver
+    ADR-061 em decisions.md).
 
     Valores monetários viram inteiro em centavos, não `float` — soma de
     ponto flutuante (faturamento, ticket médio, Sprint 5) acumula erro de
     arredondamento; centavos inteiros não.
     """
     text = str(value).strip().replace("R$", "").strip()
-    text = text.replace(".", "").replace(",", ".")
+    if "," in text:
+        # Formato BR: ponto separa milhar, vírgula separa decimal ("1.234,56").
+        text = text.replace(".", "").replace(",", ".")
+    # Sem vírgula: já é decimal com ponto ("145.00") — nada a fazer.
     try:
         amount = Decimal(text)
     except InvalidOperation as exc:
@@ -79,13 +121,25 @@ def parse_quantity(value: object) -> int:
     return quantity
 
 
+# Um formato por layout já suportado — não um parser "flexível" que aceite
+# qualquer coisa: `"2026-08-05"` (sem hora) fica de fora de propósito, para
+# não passar a aceitar o que os testes de dado inválido verificam que deve
+# falhar (ver ADR-061 em decisions.md).
+_DATE_FORMATS: tuple[str, ...] = (
+    "%d/%m/%Y",  # formato de exemplo (Sprint 4): "05/08/2026"
+    "%Y-%m-%d %H:%M",  # relatório oficial Shopee (Seller Center): "2026-07-11 17:53"
+)
+
+
 def parse_date_brazilian(value: object) -> datetime.date:
-    """`"05/08/2026"` (dia/mês/ano, formato dos relatórios BR) → `date(2026, 8, 5)`."""
+    """`"05/08/2026"` ou `"2026-07-11 17:53"` → `date(...)` (ver `_DATE_FORMATS`)."""
     text = str(value).strip()
-    try:
-        return datetime.datetime.strptime(text, "%d/%m/%Y").date()
-    except ValueError as exc:
-        raise TransformationError(f"data inválida: {value!r} (esperado dd/mm/aaaa)") from exc
+    for date_format in _DATE_FORMATS:
+        try:
+            return datetime.datetime.strptime(text, date_format).date()
+        except ValueError:
+            continue
+    raise TransformationError(f"data inválida: {value!r}")
 
 
 def map_status(value: object, mapping: dict[str, OrderStatus]) -> OrderStatus:

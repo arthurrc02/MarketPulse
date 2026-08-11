@@ -1629,3 +1629,113 @@ colunas que o arquivo real não tem sob esses nomes — ajustar
 `ShopeeTransformer` para o layout real é trabalho futuro, fora do escopo
 deste hotfix (que a restrição do hotfix explicitamente proíbe: "não
 alterar... Transformers").
+
+---
+
+## ADR-061 — `ShopeeTransformer` aceita dois layouts por alias de coluna (hotfix Sprint 4.2)
+
+**Sprint:** 4 (hotfix 4.2) · **Status:** Aceita
+
+**Contexto.** O [ADR-060](#adr-060--detecção-da-shopee-por-assinatura-de-conceitos-hotfix-sprint-41-não-mais-por-cabeçalhos-fixos)
+já previa este problema: a detecção passou a aceitar o relatório oficial
+real, mas `ShopeeTransformer` continuava lendo colunas do formato fictício
+de exemplo (`sku`, `produto`, `preco_unitario`, `status`, `data_do_pedido`),
+inexistentes no arquivo real. `tests/fixtures/shopee/orders.xlsx` (relatório
+real do Seller Center, 239 pedidos) foi analisado célula a célula antes de
+qualquer mudança de código; achados relevantes:
+
+- **Nomes de coluna diferentes**, um a um: `status_do_pedido` (não
+  `status`), `nome_do_produto` (não `produto`), `preço_acordado` (não
+  `preco_unitario`), `data_de_criação_do_pedido` (não `data_do_pedido`).
+- **Nenhuma coluna de SKU preenchida** — `Nº de referência do SKU
+  principal` e `Número de referência SKU` existem, mas estão em branco nas
+  239 linhas. `sku` é `NOT NULL` no model `OrderItem` (Sprint 4) e
+  obrigatório em `etl.schema.CANONICAL_COLUMNS`.
+- **Datas em `"AAAA-MM-DD HH:MM"`** (`"2026-07-11 17:53"`), não
+  `"DD/MM/AAAA"` como no formato de exemplo.
+- **Valores monetários em texto plano com ponto decimal** (`"145.00"`), sem
+  `"R$"` nem vírgula — o parser existente (`parse_brl_currency_to_cents`)
+  assumia sempre o formato BR (`"1.234,56"`) e, aplicado a `"145.00"`,
+  removeria o ponto como se fosse separador de milhar, produzindo
+  `14500,00` interpretado como `1.450.000` centavos — 100× o valor real.
+- **Vocabulário de status mais rico**: além de `Cancelado`/`Concluído`, o
+  arquivo real tem `Entregue`, `Enviado`, `A Enviar`, `Não pago`, e a
+  família `"O comprador pode pedir uma devolução até <data>"` — um texto
+  com uma data *variável* embutida, não enumerável como chave fixa de
+  dicionário.
+- **Cabeçalhos duplicados** (`Desconto do vendedor` e `Cidade` aparecem duas
+  vezes) — não afeta o transformer, que nunca lê essas colunas; o pandas já
+  desambigua (`desconto_do_vendedor` / `desconto_do_vendedor.1`).
+
+**Decisão.**
+
+1. `etl.transformers.common.find_column(columns, *aliases)` — resolve, uma
+   vez por chamada de `transform()` (não por linha), qual nome de coluna
+   real usar para cada campo, a partir de uma lista de grafias aceitas.
+   Mesma estratégia de aliases do Hotfix 4.1
+   (`etl.detectors.signature.concept`), aplicada aqui à escolha de *qual
+   coluna ler*, não a *"este arquivo é deste marketplace?"*.
+2. `parse_brl_currency_to_cents` passa a inspecionar o texto: presença de
+   vírgula → formato BR (ponto = milhar); ausência de vírgula → o ponto já
+   é decimal, usado como está. `parse_date_brazilian` tenta uma lista de
+   formatos conhecidos (`dd/mm/aaaa`, depois `aaaa-mm-dd hh:mm`) — **não**
+   um parser "flexível" que aceite qualquer formato: `"aaaa-mm-dd"` sem hora
+   foi deliberadamente deixado de fora, para não passar a aceitar o valor
+   que um teste já existente (`data_invalida`) verifica que deve falhar.
+3. `_STATUS_MAP` do `ShopeeTransformer` ganhou `entregue`, `enviado`,
+   `a enviar`, `não pago`. A família `"O comprador pode pedir..."` **não**
+   ganhou tratamento especial — cai no comportamento já existente de status
+   não mapeado (`OrderStatus.UNKNOWN`, ADR-051), que não interrompe o
+   arquivo.
+4. `derive_sku_from_product_name(product_name)` gera um SKU determinístico
+   (`"AUTO-" + slug do nome do produto`) quando a coluna de SKU está
+   ausente **ou** a célula está em branco — reaproveita
+   `etl.detectors.signature.signature_key` (mesma função do Hotfix 4.1) para
+   normalizar o slug.
+
+**Alternativas descartadas.**
+
+- _Tornar `sku` opcional no model `OrderItem`/`CANONICAL_COLUMNS`_:
+  resolveria a ausência de SKU sem precisar derivar nada, mas altera um
+  contrato público (schema do banco, migration) — explicitamente fora do
+  escopo do hotfix ("não altere... os contratos públicos").
+- _Usar o `external_order_id` como SKU de fallback_: mais simples de
+  implementar, mas cada pedido tem um id único — o mesmo produto vendido em
+  pedidos diferentes ganharia SKUs diferentes, inutilizando qualquer
+  agrupamento por produto na Sprint 5. Rejeitada em favor de derivar do
+  **nome do produto** (testado: `test_official_fixture_derives_the_same_sku_for_the_same_product`
+  — mesmo produto, mesmo SKU derivado, entre pedidos diferentes).
+  Verificado com o arquivo real: 239 pedidos colapsam em só 8 produtos
+  distintos, cada um com um único SKU derivado.
+- _Uma coluna de "total" lida diretamente do arquivo (`Valor Total`)_: o
+  arquivo real tem essa coluna (é inclusive um dos 5 conceitos da assinatura
+  de detecção do ADR-060), mas os dados mostram que ela é o total *cobrado
+  do comprador* no nível do **pedido** (inclui frete, e é `0.00` em pedidos
+  cancelados mesmo quando o produto tem valor) — usá-la corromperia
+  `total_price_cents` por item. Mantida a fórmula já existente
+  (`unit_price_cents * quantity`, equivalente a `Subtotal do produto`,
+  conferido nas 239 linhas sem nenhuma divergência).
+- _Regex com grupo de captura para a família "O comprador pode pedir..."_:
+  extrairia a data de devolução, mas adicionaria um caso especial só para
+  este hotfix quando o comportamento padrão já existente (status
+  desconhecido → `UNKNOWN`, sem interromper o arquivo) já resolve
+  adequadamente — complexidade sem benefício claro no escopo atual.
+
+**Consequências.** `tests/fixtures/shopee/orders.xlsx` processa as 239
+linhas sem erro, ponta a ponta (extração → transformação → validação →
+carga), verificado tanto em testes automatizados
+(`test_shopee_official_fixture.py`, 8 testes novos) quanto manualmente via
+Docker Compose real (upload + `POST /uploads/{id}/process` →
+`status: "processed"`, 239 `OrderItem` gravados, distribuição de status
+77 cancelados / 63 concluídos / 83 pendentes / 16 desconhecidos). O formato
+fictício da Sprint 4 continua funcionando sem nenhuma alteração de
+comportamento — toda a suíte pré-existente (63 testes do pacote `etl`)
+passou sem editar nenhum fixture. `MercadoLivreTransformer` não foi tocado.
+
+**Limitação conhecida.** O SKU derivado (`AUTO-...`) não é um identificador
+de catálogo real — é estável e agrupável, mas dois produtos com nomes
+ligeiramente diferentes (erro de digitação, variação de descrição) gerariam
+SKUs derivados diferentes mesmo sendo o "mesmo" produto na prática. Aceitável
+para esta sprint (nenhuma tela exibe SKU ainda); se a Sprint 5 precisar de
+um catálogo de produtos mais preciso, uma correspondência aproximada
+(fuzzy matching) de nomes fica registrada como melhoria futura.

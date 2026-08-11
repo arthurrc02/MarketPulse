@@ -252,6 +252,19 @@ agora é corretamente roteado ao pipeline Shopee, mas o `ShopeeTransformer`
 ainda espera os nomes de coluna do formato fictício de exemplo (ajustá-lo
 ao layout real é trabalho futuro, fora deste hotfix).
 
+**Hotfix 4.2 (pós-sprint):** com a detecção corrigida, o processamento do
+relatório oficial real ainda falhava no `ShopeeTransformer` (colunas com
+nomes diferentes do formato fictício, datas em `aaaa-mm-dd hh:mm`, valores
+monetários sem `R$`/vírgula, nenhuma coluna de SKU preenchida). Analisado o
+arquivo real (`tests/fixtures/shopee/orders.xlsx`, 239 pedidos) e adaptado o
+`ShopeeTransformer` para aceitar os dois layouts por alias de coluna
+(`find_column`, mesma estratégia do Hotfix 4.1), com SKU derivado do nome
+do produto quando ausente — ver
+[ADR-061](decisions.md#adr-061--shopeetransformer-aceita-dois-layouts-por-alias-de-coluna-hotfix-sprint-42).
+O arquivo real processa as 239 linhas com `status: "processed"`, sem
+regressão no formato fictício. `Extractor`/`Loader`/`ETLPipeline`, models,
+migrations e endpoints não foram alterados.
+
 **Fora de escopo (por decisão, fica para sprints futuras):** Amazon e Magalu
 (arquitetura pronta, sem detector ainda), fila real (Celery/Dramatiq/RQ —
 processamento continua síncrono), tolerância a erro por linha (um arquivo com
