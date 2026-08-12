@@ -8,8 +8,8 @@
 | 3      | File Import                         | ✅ Concluída |
 | 4      | ETL Engine                          | ✅ Concluída |
 | 5      | Analytics Dashboard                 | ✅ Concluída |
-| 6      | Business Insights                   | ⏳ Próxima   |
-| 7      | Release Candidate                   | ⬜ Planejada |
+| 6      | Business Insights                   | ✅ Concluída |
+| 7      | Release Candidate                   | ⏳ Próxima   |
 
 ---
 
@@ -324,20 +324,58 @@ importados, fila assíncrona, insights automáticos (Sprint 6).
 
 ---
 
-## Sprint 6 — Business Insights ⏳
+## Sprint 6 — Business Insights ✅
 
-**Objetivo:** observações automáticas baseadas em regras de negócio.
+**Objetivo:** transformar os dados de Analytics em observações de negócio
+objetivas e explicáveis — sem IA/ML, só regras matemáticas transparentes
+sobre agregações já existentes.
 
-**Escopo previsto:**
+**Entregue:**
 
-- Motor de regras sobre os dados consolidados.
-- Detecção de crescimento/queda de faturamento, variação de ticket médio,
-  produtos em destaque e melhores canais.
-- Apresentação dos insights no dashboard.
+- Camada de Insights própria (`Router → Service → Repository`), separada de
+  Analytics mas reaproveitando suas agregações — `InsightsRepository`
+  compõe `AnalyticsRepository` (mesma sessão) em vez de duplicar SQL; só a
+  receita agrupada por marketplace é uma consulta nova (ver
+  [ADR-067](decisions.md#adr-067--insightsrepository-reaproveita-analyticsrepository-em-vez-de-duplicar-sql)).
+- Seis tipos de insight: tendência de faturamento, evolução de pedidos e de
+  ticket médio (todos comparando com um "período anterior equivalente" —
+  mesmo número de dias, imediatamente antes, exigindo `from`/`to`
+  explícitos, ver [ADR-065](decisions.md#adr-065--período-atual-e-anterior-em-insights)),
+  produto em destaque (maior faturamento + participação %), produto com
+  queda de desempenho (só entre produtos relevantes — ≥ 10% do faturamento
+  do período anterior, ver [ADR-066](decisions.md#adr-066--critério-de-relevância-para-produto-em-queda)),
+  e marketplace de melhor desempenho (só com 2+ marketplaces nos dados).
+- Endpoint `GET /api/v1/insights`, mesmos filtros de Analytics
+  (`from`/`to`/`marketplace`), resposta tipada (`has_data` + lista de
+  `Insight` com `id`/`type`/`title`/`description`/`severity`/`value`) —
+  contrato completo em [api.md](api.md#business-insights).
+- Frontend: `InsightsSection` no Dashboard (busca própria via
+  `useInsightsQuery`, estados de carregamento/erro/vazio/dados
+  insuficientes/sucesso distintos), `InsightCard` (ícone e cor por
+  severidade — nunca por tipo, já que o mesmo tipo pode ser positivo ou
+  negativo conforme os dados), animação de entrada/saída seletiva (Framer
+  Motion) ao trocar filtros.
+- 22 testes de backend novos (20 determinísticos + 2 de integração contra
+  `orders.xlsx` real) e 9 de frontend (`InsightsSection`), cobrindo
+  crescimento/queda em cada métrica, produto em destaque, produto em queda
+  (incluindo exclusão de produto irrelevante), marketplace único vs.
+  múltiplo, ausência de dados, dados insuficientes, período anterior sem
+  dados, filtros, isolamento por usuário e empate.
+- Validado o fluxo completo com o arquivo real (`orders.xlsx`, 239 pedidos,
+  não alterado): upload → processamento → `GET /insights` retornando
+  faturamento em queda (-19,7%), pedidos em queda (-14,7%), ticket médio em
+  queda (-5,8%), produto em destaque (86,1% de participação) e produto em
+  queda (-100%, produto sem vendas no período atual) — números conferidos
+  de forma independente antes de escrever os testes, não copiados às cegas.
+
+**Fora de escopo (por decisão):** IA/ML/LLM, previsão de vendas,
+recomendações automáticas, análise de sentimento, novos marketplaces,
+alterações no ETL/autenticação/upload, fila assíncrona, edição manual de
+`OrderItem`.
 
 ---
 
-## Sprint 7 — Release Candidate ⬜
+## Sprint 7 — Release Candidate ⏳
 
 **Objetivo:** preparar o produto para apresentação.
 

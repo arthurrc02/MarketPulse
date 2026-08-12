@@ -117,8 +117,16 @@ class AnalyticsRepository(BaseRepository):
         return [StatusRow(status=row[0], count=row[1]) for row in self.session.execute(stmt).all()]
 
     def top_products(
-        self, *, user_id: uuid.UUID, filters: AnalyticsFilters, limit: int
+        self, *, user_id: uuid.UUID, filters: AnalyticsFilters, limit: int | None = None
     ) -> list[ProductRow]:
+        """Produtos `completed`, do maior para o menor faturamento.
+
+        `limit=None` devolve **todos** os produtos, sem `LIMIT` — usado pelo
+        `InsightsRepository` (Sprint 6), que precisa do conjunto completo
+        para comparar dois períodos produto a produto, não só o topo de um
+        período isolado (ver ADR-067 em `docs/decisions.md`). O endpoint
+        `GET /analytics/top-products` continua sempre passando um `int`.
+        """
         stmt = (
             select(
                 OrderItem.product_name,
@@ -130,8 +138,9 @@ class AnalyticsRepository(BaseRepository):
             .where(*self._conditions(user_id, filters, status=_COMPLETED))
             .group_by(OrderItem.product_name, OrderItem.sku)
             .order_by(func.sum(OrderItem.total_price_cents).desc())
-            .limit(limit)
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return [
             ProductRow(
                 product_name=row[0],
@@ -146,13 +155,26 @@ class AnalyticsRepository(BaseRepository):
     def _conditions(
         self, user_id: uuid.UUID, filters: AnalyticsFilters, *, status: OrderStatus | None
     ) -> list[Any]:
-        conditions: list[Any] = [OrderItem.user_id == user_id]
-        if status is not None:
-            conditions.append(OrderItem.status == status)
-        if filters.date_from is not None:
-            conditions.append(OrderItem.order_date >= filters.date_from)
-        if filters.date_to is not None:
-            conditions.append(OrderItem.order_date <= filters.date_to)
-        if filters.marketplace is not None:
-            conditions.append(OrderItem.marketplace == filters.marketplace)
-        return conditions
+        return build_order_item_conditions(user_id, filters, status=status)
+
+
+def build_order_item_conditions(
+    user_id: uuid.UUID, filters: AnalyticsFilters, *, status: OrderStatus | None
+) -> list[Any]:
+    """Condições `WHERE` compartilhadas por qualquer consulta sobre `OrderItem`.
+
+    Módulo-level (não um método "privado" de `AnalyticsRepository`) de
+    propósito: `InsightsRepository` (Sprint 6) precisa da mesma lógica de
+    filtro para sua própria consulta de receita por marketplace, sem
+    reimplementá-la nem acessar um método interno de outra classe.
+    """
+    conditions: list[Any] = [OrderItem.user_id == user_id]
+    if status is not None:
+        conditions.append(OrderItem.status == status)
+    if filters.date_from is not None:
+        conditions.append(OrderItem.order_date >= filters.date_from)
+    if filters.date_to is not None:
+        conditions.append(OrderItem.order_date <= filters.date_to)
+    if filters.marketplace is not None:
+        conditions.append(OrderItem.marketplace == filters.marketplace)
+    return conditions

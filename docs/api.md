@@ -1,6 +1,6 @@
 # MarketPulse — API Reference
 
-Referência dos endpoints disponíveis após a Sprint 5 (Analytics Dashboard). A
+Referência dos endpoints disponíveis após a Sprint 6 (Business Insights). A
 documentação interativa (Swagger) fica em `/docs` fora do ambiente de
 produção — ver [ADR-003](decisions.md#adr-003--health-fora-do-prefixo-versionado-da-api).
 
@@ -449,6 +449,116 @@ Produtos com maior faturamento, já ordenados e limitados pelo backend.
 | ------ | -------------------------------------------------------- |
 | `401`  | Sem token de acesso válido.                               |
 | `422`  | `from` posterior a `to`, `marketplace` inválido, ou `limit` fora de 1–50 (só `top-products`). |
+
+---
+
+## Business Insights
+
+Enquanto Analytics expõe *métricas* (o quê), Insights interpreta essas
+métricas e produz *observações* (o que isso significa) — comparação com o
+período anterior, concentração em um produto ou marketplace. Nenhuma regra
+usa IA/ML: só aritmética sobre as mesmas agregações de Analytics (ver
+[ADR-067](decisions.md#adr-067--insightsrepository-reaproveita-analyticsrepository-em-vez-de-duplicar-sql)).
+
+### `GET /api/v1/insights`
+
+Exige `Authorization: Bearer <access_token>`. Aceita os mesmos três filtros
+de Analytics (`from`, `to`, `marketplace` — mesma tabela, não repetida
+aqui); `from`/`to` têm um papel adicional aqui: **insights de comparação de
+período só existem quando os dois são informados** — ver
+[ADR-065](decisions.md#adr-065--período-atual-e-anterior-em-insights).
+
+**Requisição:**
+
+```bash
+curl "http://localhost:8000/api/v1/insights?from=2026-07-18&to=2026-07-27" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Resposta `200`:**
+
+```json
+{
+  "has_data": true,
+  "insights": [
+    {
+      "id": "revenue_trend",
+      "type": "revenue_trend",
+      "title": "Faturamento em queda",
+      "description": "Seu faturamento caiu 19.7% em relação ao período anterior.",
+      "severity": "negative",
+      "value": -19.7,
+      "current_value": 4765.0,
+      "previous_value": 5932.0,
+      "product_name": null,
+      "sku": null,
+      "marketplace": null
+    },
+    {
+      "id": "top_product",
+      "type": "top_product",
+      "title": "Produto em destaque",
+      "description": "1Banqueta alta com encosto. suporta até 200Kg foi responsável por 86.1% do faturamento no período.",
+      "severity": "neutral",
+      "value": 86.1,
+      "current_value": 4105.0,
+      "previous_value": null,
+      "product_name": "1Banqueta alta com encosto. suporta até 200Kg",
+      "sku": "AUTO-1BANQUETAALTACOMENCOSTOSUPORTAATE200KG",
+      "marketplace": null
+    }
+  ]
+}
+```
+
+`insights` só contém os tipos que puderam ser calculados — um tipo ausente
+não é um erro, é a regra decidindo que não há uma observação válida (ver
+seção "Quando um insight não é gerado" abaixo). `has_data` tem o mesmo papel
+do campo homônimo em `AnalyticsOverview`: `false` só quando o usuário nunca
+importou nenhum `OrderItem`; com dados mas sem nenhum insight aplicável,
+`has_data` é `true` e `insights` é `[]` ("dados insuficientes", distinto de
+"sem dados").
+
+**`value` é sempre um percentual** (variação ou participação, conforme o
+tipo — nunca um valor monetário isolado); `current_value`/`previous_value`
+trazem o valor absoluto por trás do percentual (reais ou contagem de
+pedidos) só como contexto para a UI.
+
+### Tipos de insight
+
+| `type` | O que mede | `value` | Exige período anterior? |
+| ------ | ---------- | ------- | ------------------------ |
+| `revenue_trend` | Variação do faturamento `completed` | % de variação | Sim |
+| `orders_trend` | Variação da quantidade de pedidos `completed` | % de variação | Sim |
+| `average_order_value_trend` | Variação do ticket médio | % de variação | Sim |
+| `top_product` | Produto com maior faturamento no período | % de participação no faturamento total | Não |
+| `product_decline` | Produto relevante com maior queda de faturamento | % de variação (sempre negativo) | Sim |
+| `best_marketplace` | Marketplace com maior faturamento (só com ≥ 2 marketplaces nos dados filtrados) | % de participação no faturamento total | Não |
+
+### Quando um insight não é gerado
+
+- **Sem `from`/`to` (os dois)**: `revenue_trend`, `orders_trend`,
+  `average_order_value_trend` e `product_decline` ficam ausentes — não há
+  um "período anterior equivalente" para comparar. `top_product` e
+  `best_marketplace` continuam funcionando sobre o período informado (ou
+  todo o histórico, se nenhum filtro).
+- **Período anterior sem nenhum item `completed`**: mesmo efeito acima —
+  não há base para calcular uma variação percentual.
+- **`product_decline`**: só considera produtos cuja receita no período
+  anterior seja ≥ 10% do faturamento total do período anterior (evita
+  apontar quedas percentualmente grandes em produtos irrelevantes em valor
+  absoluto — ver [ADR-066](decisions.md#adr-066--critério-de-relevância-para-produto-em-queda)); se nenhum produto relevante caiu, o insight não aparece.
+- **`best_marketplace`**: exige pelo menos 2 marketplaces com faturamento
+  `completed` > 0 nos dados filtrados — inclusive quando o próprio filtro
+  `marketplace` já reduz a resposta a um só.
+- **`top_product`**: exige faturamento `completed` total > 0 no período.
+
+**Erros:**
+
+| Status | Situação                                              |
+| ------ | -------------------------------------------------------- |
+| `401`  | Sem token de acesso válido.                               |
+| `422`  | `from` posterior a `to`, ou `marketplace` inválido.        |
 
 ---
 

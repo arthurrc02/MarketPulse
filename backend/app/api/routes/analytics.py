@@ -27,7 +27,8 @@ DateFromQuery = Annotated[date | None, Query(alias="from", description="Data ini
 DateToQuery = Annotated[date | None, Query(alias="to", description="Data final (inclusiva).")]
 MarketplaceQuery = Annotated[Marketplace | None, Query(description="Filtra por marketplace.")]
 
-_FILTER_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+#: Reaproveitado por `app.api.routes.insights` — mesma validação de período, mesmo erro.
+FILTER_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ErrorResponse}
 }
 
@@ -36,7 +37,7 @@ _FILTER_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     "/overview",
     response_model=AnalyticsOverview,
     summary="KPIs principais (faturamento, pedidos, ticket médio, produtos ativos)",
-    responses=_FILTER_ERROR_RESPONSES,
+    responses=FILTER_ERROR_RESPONSES,
 )
 def get_overview(
     current_user: CurrentUserDep,
@@ -54,7 +55,7 @@ def get_overview(
     "/sales-over-time",
     response_model=list[SalesOverTimePoint],
     summary="Faturamento e pedidos por dia",
-    responses=_FILTER_ERROR_RESPONSES,
+    responses=FILTER_ERROR_RESPONSES,
 )
 def get_sales_over_time(
     current_user: CurrentUserDep,
@@ -72,7 +73,7 @@ def get_sales_over_time(
     "/orders-by-status",
     response_model=list[OrderStatusBreakdown],
     summary="Distribuição de pedidos por status",
-    responses=_FILTER_ERROR_RESPONSES,
+    responses=FILTER_ERROR_RESPONSES,
 )
 def get_orders_by_status(
     current_user: CurrentUserDep,
@@ -90,7 +91,7 @@ def get_orders_by_status(
     "/top-products",
     response_model=list[TopProduct],
     summary="Produtos com maior faturamento",
-    responses=_FILTER_ERROR_RESPONSES,
+    responses=FILTER_ERROR_RESPONSES,
 )
 def get_top_products(
     current_user: CurrentUserDep,

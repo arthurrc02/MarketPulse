@@ -9,14 +9,13 @@ negócio. O MarketPulse importa arquivos CSV e Excel de **Shopee, Mercado Livre,
 Amazon e Magalu**, padroniza tudo em um único modelo de dados e apresenta
 indicadores, gráficos e insights automáticos em um dashboard moderno.
 
-> **Status:** Sprint 5 (Analytics Dashboard) concluída. Os dados processados
-> pelo ETL (Sprint 4) agora viram indicadores reais: faturamento, pedidos,
-> ticket médio, produtos ativos, evolução de vendas, distribuição por status
-> e top produtos, todos calculados no PostgreSQL e filtráveis por período e
-> marketplace. O Dashboard deixou de ser placeholder — KPI Cards e gráficos
-> (Recharts) mostram dados de verdade, com estados de carregamento, erro e
-> vazio tratados explicitamente. Insights automáticos baseados em regras de
-> negócio começam na Sprint 6.
+> **Status:** Sprint 6 (Business Insights) concluída. Além dos indicadores
+> reais do Dashboard (Sprint 5), o MarketPulse agora interpreta os dados e
+> produz observações automáticas — tendência de faturamento, pedidos e
+> ticket médio frente ao período anterior, produto em destaque, produto em
+> queda e marketplace de melhor desempenho — tudo por regras matemáticas
+> transparentes sobre o PostgreSQL, sem IA/ML. Release Candidate (refino de
+> UX, responsividade e deploy de demonstração) começa na Sprint 7.
 
 ---
 
@@ -64,7 +63,7 @@ estão em **[docs/setup.md](docs/setup.md)**; os endpoints disponíveis em
 ```text
 backend/     API FastAPI em camadas (api → services → repositories → db)
 etl/         Motor ETL (extractors, transformers, loaders)
-frontend/    React + TypeScript — auth, Design System, uploads e Analytics Dashboard
+frontend/    React + TypeScript — auth, Design System, uploads, Analytics e Insights
 storage/     Arquivos enviados via upload (bind mount, fora do Git)
 docker/      Dockerfiles e configuração do Nginx
 docs/        Documentação do projeto
@@ -118,5 +117,5 @@ somadas ao build das imagens Docker de produção.
 | 3      | File Import                         | ✅ Concluída |
 | 4      | ETL Engine                          | ✅ Concluída |
 | 5      | Analytics Dashboard                 | ✅ Concluída |
-| 6      | Business Insights                   | ⏳ Próxima   |
-| 7      | Release Candidate                   | ⬜ Planejada |
+| 6      | Business Insights                   | ✅ Concluída |
+| 7      | Release Candidate                   | ⏳ Próxima   |

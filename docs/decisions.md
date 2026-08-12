@@ -1843,3 +1843,137 @@ se um marketplace futuro realmente produzir pedidos multi-status. Se isso
 acontecer, o soma de `count` em `orders-by-status` pode superar `orders` do
 `overview` — um sinal de alerta a verificar antes de confiar cegamente no
 total.
+
+---
+
+## ADR-065 — Período atual e anterior em Insights
+
+**Sprint:** 6 · **Status:** Aceita
+
+**Contexto.** Todo insight de comparação (`revenue_trend`, `orders_trend`,
+`average_order_value_trend`, `product_decline`) precisa de dois números: o
+período selecionado e um "período anterior equivalente". Analytics (Sprint
+5) já define "sem `from`/`to`, considera todo o histórico" — um intervalo
+sem limites definidos, que não tem um comprimento para espelhar para trás.
+Era preciso decidir o que Insights faz nesse caso.
+
+**Decisão.** Insights de comparação só são calculados quando `from` **e**
+`to` são informados explicitamente. O período anterior é o mesmo número de
+dias de `[from, to]`, imediatamente anterior: `length = (to - from) + 1`
+dias; `previous_to = from - 1 dia`; `previous_from = previous_to -
+(length - 1) dias`. Exemplo: `2026-07-18..27` (10 dias) → período anterior
+`2026-07-08..17` (10 dias). Sem os dois filtros, esses quatro tipos de
+insight simplesmente não aparecem na resposta — não é um erro, é a mesma
+semântica de "dados insuficientes" do restante da sprint (ver
+[api.md](api.md#quando-um-insight-não-é-gerado)). `top_product` e
+`best_marketplace` não exigem período anterior e continuam funcionando
+sobre qualquer filtro (ou todo o histórico).
+
+Dentro de uma comparação já definida, `_pct_change(current, previous)`
+devolve `None` (não uma divisão por zero) quando o valor do período
+anterior é `0` — sem base, não há "cresceu X%" válido; o insight
+correspondente também não é gerado nesse caso. Quando `current == 0` mas
+`previous > 0`, o insight **é** gerado normalmente (`-100%`) — é uma
+comparação bem definida, só o `0` como denominador é o problema.
+Severidade: `positive` se a variação for `> 0`, `negative` se `< 0`,
+`neutral` se exatamente `0` (ex.: "faturamento estável").
+
+**Alternativas descartadas.**
+
+- _Assumir uma janela padrão (ex.: últimos 30 dias) quando `from`/`to`
+  faltam_: manteria os insights de comparação sempre visíveis, mas inventa
+  uma convenção de produto não pedida — e "últimos 30 dias" a partir de
+  quê (a data real do sistema não faz sentido para dados históricos de
+  teste/demonstração). Rejeitada em favor de ser explícito sobre a
+  limitação.
+
+**Consequências.** Um usuário que nunca usa o filtro de período só vê
+`top_product`/`best_marketplace` — os insights de tendência exigem que ele
+escolha um período pelo menos uma vez. Aceitável: o Dashboard já pede
+período/marketplace como filtros de primeira classe (Sprint 5); Insights
+não introduz um requisito novo, só herda o mesmo.
+
+---
+
+## ADR-066 — Critério de relevância para "produto em queda"
+
+**Sprint:** 6 · **Status:** Aceita
+
+**Contexto.** Ordenar produtos por queda percentual pura favorece produtos
+minúsculos: um produto que vendeu `R$ 1,00` no período anterior e `R$ 0,10`
+agora "caiu 90%", mas é irrelevante para o negócio. O enunciado da sprint
+pede um "critério objetivo de relevância", documentado.
+
+**Decisão.** Um produto só é candidato ao insight de queda se sua receita
+no período anterior for **≥ 10% do faturamento total `completed` do
+período anterior** (`_PRODUCT_RELEVANCE_SHARE = 0.10` em
+`app/services/insights.py`). Entre os produtos relevantes com variação
+negativa, reporta-se o de maior queda percentual; em empate, desempate
+determinístico por SKU (ordenação estável, não afeta o resultado em dados
+reais).
+
+**Alternativas descartadas.**
+
+- _Limiar em valor absoluto (ex.: só produtos com receita anterior ≥
+  R$ 100)_: mais simples, mas não escala — um limiar fixo é adequado para
+  um vendedor pequeno e irrelevante para um grande (ou o oposto).
+  Percentual do total do próprio período se ajusta ao volume de cada
+  usuário sem nenhum parâmetro extra por conta.
+- _Top-N produtos por receita anterior (ex.: só os 5 maiores)_: também
+  resolve "ignorar produtos pequenos", mas exclui um produto genuinamente
+  relevante se o usuário vender muitos produtos de porte parecido — o
+  critério percentual não tem esse limite arbitrário de contagem.
+
+**Consequências.** `10%` é um valor de portfólio, não calibrado com dados de
+produção — documentado aqui exatamente para não ser confundido com uma
+constante "científica" se precisar ser ajustado depois. Testado com um
+produto deliberadamente abaixo do limiar (`SKU-C`, 5% do total anterior,
+queda de 98%) para provar que a exclusão funciona mesmo com uma queda
+percentual muito maior que a do produto relevante escolhido.
+
+---
+
+## ADR-067 — `InsightsRepository` reaproveita `AnalyticsRepository` em vez de duplicar SQL
+
+**Sprint:** 6 · **Status:** Aceita
+
+**Contexto.** Quatro dos seis tipos de insight precisam exatamente das
+mesmas agregações que Analytics (Sprint 5) já expõe: totais de
+faturamento/pedidos de um período (`overview`) e receita por produto
+(`top_products`). Só a receita agrupada por marketplace é uma consulta
+genuinamente nova — nenhum KPI de Analytics precisa dela.
+
+**Decisão.** `InsightsRepository` recebe a mesma `Session` e instancia um
+`AnalyticsRepository` internamente, chamando `overview`/`top_products` para
+os dois períodos que precisar — sem reescrever `SUM`/`COUNT DISTINCT` em
+lugar nenhum. Duas mudanças pequenas e retrocompatíveis em
+`AnalyticsRepository` tornaram isso possível: `top_products(limit: int |
+None = None)` (sem `LIMIT` quando `None` — Insights precisa do conjunto
+completo de produtos para comparar dois períodos, não só o topo de um) e
+`build_order_item_conditions` virou uma função de módulo (não mais um
+método "privado" `_conditions`), para `InsightsRepository` montar sua
+própria consulta de receita por marketplace com a mesma lógica de filtro
+sem acessar um método interno de outra classe. Nenhum chamador existente
+de `top_products` (o endpoint `GET /analytics/top-products`) muda de
+comportamento — sempre passa um `int`.
+
+**Alternativas descartadas.**
+
+- _Duplicar as consultas de totais/produtos dentro de `InsightsRepository`_:
+  evitaria tocar em código da Sprint 5, mas viola diretamente o pedido
+  explícito do enunciado ("reutilizar agregações existentes... sem
+  duplicar") e cria dois lugares para manter a mesma lógica de filtro em
+  sincronia.
+- _Mover a agregação por marketplace para `AnalyticsRepository`_: manteria
+  toda leitura de `OrderItem` em um único repositório, mas nenhum KPI de
+  Analytics usa essa agregação — adicionaria uma responsabilidade a
+  Analytics que só existe para servir Insights, o acoplamento inverso do
+  que o enunciado pede ("sem acoplar indevidamente Analytics e Insights").
+
+**Consequências.** No máximo 5 consultas por requisição de Insights (2 para
+o período atual + 2 para o anterior, quando aplicável, + 1 de marketplace),
+nenhuma delas por insight individual — verificado lendo o SQL gerado durante
+o desenvolvimento, não só assumido. Toda a suíte de testes de Analytics
+(Sprint 5) foi reexecutada após as duas mudanças em `analytics.py` e
+permanece verde, sem nenhuma alteração de teste — confirma que a extensão
+foi genuinamente retrocompatível.

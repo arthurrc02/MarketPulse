@@ -530,8 +530,13 @@ contagem de `OrderItem`, que é por item, não por pedido), `average_order_value
 (ver [ADR-062](decisions.md#adr-062--kpis-de-analytics-consideram-somente-orderitem-com-status-completed)).
 
 **Filtros:** `from`/`to` (data) e `marketplace`, opcionais e combináveis,
-aplicados como `WHERE` adicionais em `AnalyticsRepository._conditions`. Sem
-filtro, considera todo o histórico do usuário. `AnalyticsService` rejeita
+aplicados como `WHERE` adicionais por `build_order_item_conditions`
+(função de módulo em `app/repositories/analytics.py` — não mais um método
+"privado" de `AnalyticsRepository` desde a Sprint 6, para que
+`InsightsRepository` reaproveite a mesma lógica sem acessar um método
+interno de outra classe; ver
+[ADR-067](decisions.md#adr-067--insightsrepository-reaproveita-analyticsrepository-em-vez-de-duplicar-sql)).
+Sem filtro, considera todo o histórico do usuário. `AnalyticsService` rejeita
 `from > to` com `422` antes de qualquer consulta.
 
 **Isolamento por usuário:** todo método de `AnalyticsRepository` recebe
@@ -576,6 +581,104 @@ Três estados tratados explicitamente (não apenas "carregando" vs.
 ação para `/app/uploads`, só quando `has_data` é `false`) e **filtro sem
 resultado** (KPIs zerados de verdade, sem esconder os filtros — `has_data`
 continua `true`).
+
+---
+
+## Business Insights (Backend)
+
+```text
+Router (routes/insights.py)
+        │
+        ▼
+InsightsService  — valida filtro (from <= to), matemática de período, 6 regras
+        │
+        ▼
+InsightsRepository  — compõe AnalyticsRepository; só uma agregação nova (por marketplace)
+        │
+        ▼
+PostgreSQL  (OrderItem, sempre WHERE user_id = :usuário_autenticado)
+```
+
+| Peça                  | Arquivo                          | Papel                                                                 |
+| ---------------------- | ----------------------------------- | ------------------------------------------------------------------------ |
+| `routes/insights.py`   | `app/api/routes/insights.py`       | Um endpoint (`GET /insights`); reaproveita os `Query()` de `routes/analytics.py`, não os redefine. |
+| `InsightsService`      | `app/services/insights.py`         | Seis regras determinísticas (`_build_*`), cálculo do "período anterior equivalente", nenhuma consulta SQL. |
+| `InsightsRepository`   | `app/repositories/insights.py`     | Compõe `AnalyticsRepository` (mesma sessão) para totais de período e receita por produto; só a receita agrupada por marketplace é uma consulta nova. |
+
+**Diferença de Analytics:** Analytics expõe métricas (faturamento, pedidos);
+Insights interpreta essas métricas e produz observações em texto pronto
+("seu faturamento caiu 19,7%"), com severidade (`positive`/`negative`/
+`neutral`) e um percentual — nunca uma string solta sem número por trás (ver
+contrato completo em [api.md](api.md#business-insights)).
+
+**Sem IA/ML** — cada um dos seis tipos é uma regra aritmética simples e
+documentada (ADR-065/066 em [decisions.md](decisions.md)):
+
+1. `revenue_trend`, `orders_trend`, `average_order_value_trend` — variação
+   percentual entre o período selecionado e um "período anterior
+   equivalente" (mesmo número de dias, imediatamente antes).
+2. `top_product` — produto com maior faturamento no período, com
+   participação percentual no total.
+3. `product_decline` — produto relevante (≥ 10% do faturamento do período
+   anterior) com a maior queda percentual.
+4. `best_marketplace` — marketplace com maior faturamento, só quando há
+   ≥ 2 marketplaces com faturamento no recorte filtrado.
+
+**No máximo 5 consultas por requisição**, nunca uma por insight: totais do
+período atual, produtos do período atual, receita por marketplace do
+período atual e, só quando `from`/`to` estão os dois presentes, totais e
+produtos do período anterior. As seis regras são funções puras em Python
+sobre esses resultados já agregados — nenhum loop grande, nenhuma consulta
+por produto individual (ver
+[ADR-067](decisions.md#adr-067--insightsrepository-reaproveita-analyticsrepository-em-vez-de-duplicar-sql)).
+
+**Período atual e anterior:** insights de comparação (1) só existem quando
+`from` **e** `to` são informados — sem os dois não há um comprimento de
+janela para definir um período anterior, e a regra simplesmente não gera o
+insight (não inventa uma janela padrão). Ver
+[ADR-065](decisions.md#adr-065--período-atual-e-anterior-em-insights) para a
+fórmula exata e o racional.
+
+**`has_data`:** mesmo papel do campo homônimo em Analytics — calculado uma
+vez por `InsightsRepository.has_any_data` (reaproveita
+`AnalyticsRepository.has_any_data`), ignora filtro e status.
+
+---
+
+## Business Insights (Frontend)
+
+```text
+DashboardPage
+   └── InsightsSection (filters)                  → GET /insights
+          ├── isLoading                → skeletons
+          ├── isError                  → mensagem de erro + "Tentar novamente"
+          ├── isSuccess && !hasData    → nada (a página já mostra o EmptyState de onboarding)
+          ├── isSuccess && insights=[] → EmptyState leve ("dados insuficientes")
+          └── isSuccess && insights.length > 0 → grade de InsightCard
+```
+
+`InsightsSection` faz sua **própria** busca (`useInsightsQuery`), não deriva
+de `useOverviewQuery` — tem seus próprios estados de carregamento/erro,
+distintos dos KPIs, mas é renderizada dentro do mesmo bloco condicional dos
+gráficos em `DashboardPage` (evita buscar/mostrar Insights quando a página
+inteira já está no EmptyState de onboarding).
+
+| Peça                  | Arquivo                                  | Papel                                                              |
+| ---------------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
+| `lib/insights/api`     | `src/lib/insights/api.ts`                 | Chamadas HTTP tipadas; reaproveita o tipo `AnalyticsFilters` de `lib/analytics/api` (mesmos filtros). |
+| `useInsights`          | `src/hooks/useInsights.ts`                | `useInsightsQuery(filters)` — `filters` na `queryKey`, mesmo padrão da Sprint 5. |
+| `components/insights/` | `InsightCard`, `InsightsSection`          | `InsightCard` é puramente apresentacional (ícone/cor por severidade); `InsightsSection` decide qual estado mostrar. |
+
+**Cor e ícone por severidade** — `positive` (verde, seta para cima),
+`negative` (vermelho, seta para baixo), `neutral` (cor primária, ícone de
+destaque) — nunca por `type`: o mesmo tipo (`revenue_trend`) pode ser
+positivo ou negativo dependendo dos dados. O sinal (`+`/`-`) no valor também
+vem da severidade, não do tipo.
+
+**Animação:** `InsightCard` usa `motion.div` (fade + leve deslocamento
+vertical) para entrada/saída — a lista inteira muda quando o filtro muda,
+então cartões aparecendo/sumindo merecem uma transição (Framer Motion usado
+seletivamente, mesmo critério do design-system.md).
 
 ---
 

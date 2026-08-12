@@ -13,6 +13,7 @@ import { OrderStatusChart } from '@/components/analytics/OrderStatusChart'
 import { OrdersChart } from '@/components/analytics/OrdersChart'
 import { RevenueChart } from '@/components/analytics/RevenueChart'
 import { TopProductsTable } from '@/components/analytics/TopProductsTable'
+import { InsightsSection } from '@/components/insights/InsightsSection'
 import { useAuth } from '@/hooks/useAuth'
 import {
   useOrdersByStatusQuery,
@@ -148,6 +149,8 @@ export function DashboardPage() {
                 />
               </Card>
             </div>
+
+            <InsightsSection filters={filters} />
           </>
         )}
       </Section>

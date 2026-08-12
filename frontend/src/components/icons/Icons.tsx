@@ -171,3 +171,33 @@ export const PlayIcon = createIcon(
     strokeLinejoin="round"
   />,
 )
+
+export const TrendUpIcon = createIcon(
+  <path
+    d="M3 17l6-6 4 4 8-8m0 0h-6m6 0v6"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />,
+)
+
+export const TrendDownIcon = createIcon(
+  <path
+    d="M3 7l6 6 4-4 8 8m0 0h-6m6 0v-6"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />,
+)
+
+export const SparkleIcon = createIcon(
+  <path
+    d="M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />,
+)

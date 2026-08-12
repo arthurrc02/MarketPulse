@@ -6,12 +6,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as analyticsApi from '@/lib/analytics/api'
 import type { AnalyticsOverview, TopProduct } from '@/lib/analytics/api'
 import { ApiError } from '@/lib/apiClient'
+import * as insightsApi from '@/lib/insights/api'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 vi.mock('@/lib/analytics/api')
+vi.mock('@/lib/insights/api')
 
 const mockedApi = vi.mocked(analyticsApi)
+const mockedInsightsApi = vi.mocked(insightsApi)
 
 function makeOverview(overrides: Partial<AnalyticsOverview> = {}): AnalyticsOverview {
   return {
@@ -50,6 +53,7 @@ beforeEach(() => {
   mockedApi.getSalesOverTime.mockResolvedValue([])
   mockedApi.getOrdersByStatus.mockResolvedValue([])
   mockedApi.getTopProducts.mockResolvedValue([])
+  mockedInsightsApi.getInsights.mockResolvedValue({ hasData: true, insights: [] })
 })
 
 describe('DashboardPage', () => {
@@ -194,5 +198,20 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('Faturamento ao longo do tempo')).toBeInTheDocument()
     expect(screen.getByText('Pedidos ao longo do tempo')).toBeInTheDocument()
     expect(screen.getByText('Pedidos por status')).toBeInTheDocument()
+  })
+
+  it('renders the Insights section and refetches it when the period filter changes', async () => {
+    mockedApi.getOverview.mockResolvedValue(makeOverview())
+
+    renderDashboard()
+    await screen.findByText('R$ 6.500,00')
+
+    expect(await screen.findByText('Insights')).toBeInTheDocument()
+    expect(mockedInsightsApi.getInsights).toHaveBeenLastCalledWith({})
+
+    fireEvent.change(screen.getByLabelText('De'), { target: { value: '2026-07-01' } })
+
+    await screen.findByText('R$ 6.500,00')
+    expect(mockedInsightsApi.getInsights).toHaveBeenLastCalledWith({ from: '2026-07-01' })
   })
 })

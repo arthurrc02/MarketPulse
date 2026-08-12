@@ -15,6 +15,7 @@ from app.services.analytics import AnalyticsService
 from app.services.auth import AuthService
 from app.services.etl_processor import ETLProcessorService
 from app.services.health import HealthService
+from app.services.insights import InsightsService
 from app.services.upload import UploadService
 from app.storage.local import LocalFileStorage
 
@@ -93,3 +94,11 @@ def get_analytics_service(session: SessionDep) -> AnalyticsService:
 
 
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
+
+
+def get_insights_service(session: SessionDep) -> InsightsService:
+    """Injeta o serviço de Insights. Sem storage — só leitura agregada do banco."""
+    return InsightsService(session)
+
+
+InsightsServiceDep = Annotated[InsightsService, Depends(get_insights_service)]
