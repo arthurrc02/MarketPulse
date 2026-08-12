@@ -74,7 +74,9 @@ describe('InsightsSection', () => {
     await vi.waitFor(() => {
       expect(mockedApi.getInsights).toHaveBeenCalled()
     })
-    expect(screen.queryByText('Nenhum insight disponível para este período')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Nenhum insight disponível para este período'),
+    ).not.toBeInTheDocument()
   })
 
   it('shows the insufficient-data state when the user has data but no rule matched', async () => {
@@ -82,7 +84,9 @@ describe('InsightsSection', () => {
 
     renderWithProviders(<InsightsSection filters={{}} />)
 
-    expect(await screen.findByText('Nenhum insight disponível para este período')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Nenhum insight disponível para este período'),
+    ).toBeInTheDocument()
   })
 
   it('renders a card per insight with title, description and formatted value', async () => {
